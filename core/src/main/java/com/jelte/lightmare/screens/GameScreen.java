@@ -1,9 +1,13 @@
 package com.jelte.lightmare.screens;
 
+import box2dLight.PointLight;
+import box2dLight.RayHandler;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
@@ -23,6 +27,12 @@ public class GameScreen implements Screen {
     private PlayerController playerController;
     private Player player;
 
+    // Lighting
+    private World world;
+    private RayHandler rayHandler;
+    private PointLight playerLight;
+    private PointLight houseLight;
+
     public GameScreen() {
         camera = new OrthographicCamera();
         viewport = new FitViewport(320, 180, camera);
@@ -30,12 +40,21 @@ public class GameScreen implements Screen {
         entityManager = new EntityManager();
         playerController = new PlayerController();
 
+        // Physics & Lighting setup
+        world = new World(new Vector2(0, 0), true);
+        rayHandler = new RayHandler(world);
+        rayHandler.setAmbientLight(0.05f, 0.05f, 0.1f, 0.1f); // Very dark blue night
+
         // Setup initial world
         House house = new House(140, 70, Resources.houseTexture);
         player = new Player(156, 80, Resources.playerTexture);
         
         entityManager.addEntity(house);
         entityManager.addEntity(player);
+
+        // Add lights
+        houseLight = new PointLight(rayHandler, 128, new Color(1, 0.9f, 0.7f, 0.8f), 100, house.getPosition().x + 24, house.getPosition().y + 24);
+        playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 0.8f, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
         // Add some resources
         entityManager.addEntity(new Resource(50, 50, Resources.resourceTexture));
@@ -56,11 +75,15 @@ public class GameScreen implements Screen {
         
         entityManager.update(delta);
 
+        // Update lights
+        playerLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
+        playerLight.setDistance(player.getLightRadius());
+
         // Interaction logic
         checkInteractions(delta);
 
         // Rendering
-        ScreenUtils.clear(0.05f, 0.05f, 0.1f, 1f);
+        ScreenUtils.clear(0, 0, 0, 1f); // Clear to absolute black
 
         camera.update();
         batch.setProjectionMatrix(camera.combined);
@@ -72,6 +95,10 @@ public class GameScreen implements Screen {
         renderUI();
         
         batch.end();
+
+        // Render Lights
+        rayHandler.setCombinedMatrix(camera);
+        rayHandler.updateAndRender();
     }
 
     private void checkInteractions(float delta) {
