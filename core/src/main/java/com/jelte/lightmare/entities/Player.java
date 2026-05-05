@@ -50,4 +50,9 @@ public class Player extends Entity {
         // Light radius shrinks with battery, but stays at least 50% until dead
         return lightRadius * (0.5f + 0.5f * (batteryLevel / maxBattery));
     }
+
+    public float getEmergencyLightRadius() {
+        // Small constant glow so player isn't blind
+        return 20f;
+    }
 }

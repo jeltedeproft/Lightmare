@@ -6,6 +6,7 @@ import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.utils.ScreenUtils;
@@ -29,12 +30,17 @@ public class GameScreen implements Screen {
     private MonsterSystem monsterSystem;
     private PlayerController playerController;
     private Player player;
+    private House house;
 
     // Lighting
     private World world;
     private RayHandler rayHandler;
     private PointLight playerLight;
+    private PointLight emergencyLight;
     private PointLight houseLight;
+
+    // UI Effects
+    private float pulseTimer = 0;
 
     public GameScreen() {
         camera = new OrthographicCamera();
@@ -50,7 +56,7 @@ public class GameScreen implements Screen {
         rayHandler.setAmbientLight(0.05f, 0.05f, 0.1f, 0.1f); // Very dark blue night
 
         // Setup initial world
-        House house = new House(140, 70, Resources.houseTexture);
+        house = new House(140, 70, Resources.houseTexture);
         player = new Player(156, 80, Resources.playerTexture);
         
         entityManager.addEntity(house);
@@ -59,6 +65,7 @@ public class GameScreen implements Screen {
         // Add lights
         houseLight = new PointLight(rayHandler, 128, new Color(1, 0.9f, 0.7f, 0.8f), 100, house.getPosition().x + 24, house.getPosition().y + 24);
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 0.8f, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
+        emergencyLight = new PointLight(rayHandler, 32, new Color(0.2f, 0.2f, 0.5f, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
         // Add some resources
         entityManager.addEntity(new Resource(50, 50, Resources.resourceTexture));
@@ -88,6 +95,9 @@ public class GameScreen implements Screen {
         // Update lights
         playerLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
         playerLight.setDistance(player.getLightRadius());
+        
+        emergencyLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
+        emergencyLight.setDistance(player.getEmergencyLightRadius());
 
         // Interaction logic
         checkInteractions(delta);
@@ -100,6 +110,10 @@ public class GameScreen implements Screen {
 
         batch.begin();
         entityManager.render(batch);
+        
+        // Render Home Indicator Pulse
+        renderHomeIndicator(delta);
+        
         batch.end();
 
         // Render Lights
@@ -108,6 +122,26 @@ public class GameScreen implements Screen {
 
         // UI: Battery bar (Wordless) - Rendered in screen space
         renderUI();
+    }
+
+    private void renderHomeIndicator(float delta) {
+        float batteryPct = player.getBatteryLevel() / player.getMaxBattery();
+        if (batteryPct < 0.25f) {
+            pulseTimer += delta * (1.0f - batteryPct) * 10f; // Pulses faster when lower
+            float alpha = 0.3f + 0.4f * MathUtils.sin(pulseTimer);
+            
+            // Calculate angle to house
+            float angle = MathUtils.atan2(house.getPosition().y + 24 - (player.getPosition().y + 8), 
+                                         house.getPosition().x + 24 - (player.getPosition().x + 8)) * MathUtils.radiansToDegrees;
+            
+            batch.setColor(1, 1, 1, alpha);
+            // Draw arrow 32 pixels away from player toward house
+            float arrowX = player.getPosition().x + 8 + MathUtils.cosDeg(angle) * 32 - 8;
+            float arrowY = player.getPosition().y + 8 + MathUtils.sinDeg(angle) * 32 - 8;
+            
+            batch.draw(Resources.arrowTexture, arrowX, arrowY, 8, 8, 16, 16, 1, 1, angle - 90, 0, 0, 16, 16, false, false);
+            batch.setColor(Color.WHITE);
+        }
     }
 
     private void checkInteractions(float delta) {
