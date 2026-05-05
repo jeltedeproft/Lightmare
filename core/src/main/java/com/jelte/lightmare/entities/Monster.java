@@ -19,9 +19,12 @@ public class Monster extends Entity {
         float distToPlayer = position.dst(player.getPosition());
         float distToHouse = position.dst(house.getPosition());
 
+        float pLight = player.getLightRadius();
+        float hLight = house.getLightRadius();
+
         // Check if monster is in light
-        boolean inPlayerLight = distToPlayer < player.getLightRadius();
-        boolean inHouseLight = distToHouse < house.getLightRadius();
+        boolean inPlayerLight = pLight > 0 && distToPlayer < pLight;
+        boolean inHouseLight = hLight > 0 && distToHouse < hLight;
 
         if (inPlayerLight || inHouseLight) {
             // Flee from player

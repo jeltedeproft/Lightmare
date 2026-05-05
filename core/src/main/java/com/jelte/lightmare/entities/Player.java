@@ -46,7 +46,8 @@ public class Player extends Entity {
     }
 
     public float getLightRadius() {
-        // Light radius could shrink with battery
+        if (batteryLevel <= 0) return 0;
+        // Light radius shrinks with battery, but stays at least 50% until dead
         return lightRadius * (0.5f + 0.5f * (batteryLevel / maxBattery));
     }
 }
