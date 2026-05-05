@@ -19,8 +19,8 @@ public class Resources {
         monsterTexture = createColoredTexture(16, 16, Color.RED);
         resourceTexture = createColoredTexture(16, 16, Color.GRAY);
         pixelTexture = createColoredTexture(1, 1, Color.WHITE);
-        arrowTexture = createArrowTexture(16, 16, Color.WHITE);
-        restartTexture = createRestartTexture(32, 32, Color.WHITE);
+        arrowTexture = createArrowTexture(64, 64, Color.WHITE); // Higher res
+        restartTexture = createRestartTexture(128, 128, Color.WHITE); // Higher res
     }
 
     private static Texture createColoredTexture(int width, int height, Color color) {
@@ -28,6 +28,7 @@ public class Resources {
         pixmap.setColor(color);
         pixmap.fill();
         Texture texture = new Texture(pixmap);
+        texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         pixmap.dispose();
         return texture;
     }
@@ -37,9 +38,9 @@ public class Resources {
         pixmap.setColor(new Color(0,0,0,0));
         pixmap.fill();
         pixmap.setColor(color);
-        // Simple triangle pointing up
         pixmap.fillTriangle(width/2, 0, 0, height, width, height);
         Texture texture = new Texture(pixmap);
+        texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         pixmap.dispose();
         return texture;
     }
@@ -49,14 +50,25 @@ public class Resources {
         pixmap.setColor(new Color(0,0,0,0));
         pixmap.fill();
         pixmap.setColor(color);
-        // Draw a circular arc (simplified)
-        pixmap.drawCircle(width/2, height/2, width/3);
+        
+        // Thicker circular arc
+        int centerX = width / 2;
+        int centerY = height / 2;
+        int radius = width / 3;
+        
+        for (int i = 0; i < 4; i++) { // Mock "thickness"
+            pixmap.drawCircle(centerX, centerY, radius - i);
+        }
+        
         pixmap.setColor(new Color(0,0,0,0));
-        pixmap.fillRectangle(width/2, 0, width/2, height/2); // Cut part of circle
+        pixmap.fillRectangle(width/2, 0, width/2, height/2); 
+        
         pixmap.setColor(color);
-        // Arrow head for the circle
-        pixmap.fillTriangle(width/2, 0, width/2, height/4, width*3/4, height/8);
+        // Larger Arrow head
+        pixmap.fillTriangle(width/2, 0, width/2, height/3, width*4/5, height/6);
+        
         Texture texture = new Texture(pixmap);
+        texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         pixmap.dispose();
         return texture;
     }
