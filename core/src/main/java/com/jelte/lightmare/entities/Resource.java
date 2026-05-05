@@ -5,6 +5,8 @@ import com.badlogic.gdx.math.Vector2;
 
 public class Resource extends Entity {
     private boolean mined = false;
+    private int clicksRequired = 3;
+    private int currentClicks = 0;
     private Entity followTarget;
     private float followSpeed = 150f;
     private float stopDistance = 12f;
@@ -24,10 +26,23 @@ public class Resource extends Entity {
         }
     }
 
+    public boolean click() {
+        if (mined) return false;
+        currentClicks++;
+        // Visual feedback: shrink slightly per click
+        float scale = 1.0f - ((float)currentClicks / (clicksRequired + 1)) * 0.5f;
+        size.set(16 * scale, 16 * scale);
+        
+        if (currentClicks >= clicksRequired) {
+            return true;
+        }
+        return false;
+    }
+
     public void setMined(boolean mined, Entity target) {
         this.mined = mined;
         this.followTarget = target;
-        this.size.set(8, 8); // Make it smaller when mined for the trail
+        this.size.set(8, 8); // Final trail size
     }
 
     public boolean isMined() {

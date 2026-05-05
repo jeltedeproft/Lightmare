@@ -156,9 +156,11 @@ public class GameScreen implements Screen {
                         // Check if player is near
                         if (player.getPosition().dst(e.getPosition()) < 50) {
                             Resource r = (Resource) e;
-                            Entity followTarget = trail.isEmpty() ? player : trail.get(trail.size() - 1);
-                            r.setMined(true, followTarget);
-                            trail.add(r);
+                            if (r.click()) {
+                                Entity followTarget = trail.isEmpty() ? player : trail.get(trail.size() - 1);
+                                r.setMined(true, followTarget);
+                                trail.add(r);
+                            }
                         }
                     }
                 }
@@ -172,8 +174,17 @@ public class GameScreen implements Screen {
         batch.begin();
         // Visual "X" or dead icon instead of words
         batch.setColor(Color.WHITE);
-        batch.draw(Resources.pixelTexture, 150, 80, 20, 20); // Placeholder "dead" box
+        batch.draw(Resources.restartTexture, 144, 74, 32, 32); 
         batch.end();
+
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            Vector3 uiCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            // Since we are in 320x180 virtual space for the restart button
+            viewport.unproject(uiCoords); 
+            if (uiCoords.x >= 144 && uiCoords.x <= 176 && uiCoords.y >= 74 && uiCoords.y <= 106) {
+                ((com.badlogic.gdx.Game)Gdx.app.getApplicationListener()).setScreen(new GameScreen());
+            }
+        }
     }
 
     private void renderHomeIndicator(float delta) {
