@@ -7,6 +7,8 @@ public class Player extends Entity {
     private final float maxBattery = 100f;
     private float lightRadius = 50f;
     private float speed = 100f;
+    private float hp = 100f;
+    private final float maxHp = 100f;
 
     public Player(float x, float y, Texture texture) {
         super(x, y, 16, 16, texture);
@@ -51,8 +53,25 @@ public class Player extends Entity {
         return lightRadius * (0.5f + 0.5f * (batteryLevel / maxBattery));
     }
 
+    public float getHp() {
+        return hp;
+    }
+
+    public float getMaxHp() {
+        return maxHp;
+    }
+
+    public void takeDamage(float amount) {
+        hp -= amount;
+        if (hp < 0) hp = 0;
+    }
+
+    public void heal(float amount) {
+        hp += amount;
+        if (hp > maxHp) hp = maxHp;
+    }
+
     public float getEmergencyLightRadius() {
-        // Small constant glow so player isn't blind
         return 20f;
     }
 }

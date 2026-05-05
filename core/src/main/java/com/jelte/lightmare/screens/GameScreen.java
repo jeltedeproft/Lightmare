@@ -2,12 +2,15 @@ package com.jelte.lightmare.screens;
 
 import box2dLight.PointLight;
 import box2dLight.RayHandler;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
@@ -21,8 +24,13 @@ import com.jelte.lightmare.entities.Resource;
 import com.jelte.lightmare.input.PlayerController;
 import com.jelte.lightmare.systems.EntityManager;
 import com.jelte.lightmare.systems.MonsterSystem;
+import java.util.ArrayList;
+import java.util.List;
 
 public class GameScreen implements Screen {
+    private enum State { PLAYING, GAMEOVER }
+    private State state = State.PLAYING;
+
     private OrthographicCamera camera;
     private Viewport viewport;
     private SpriteBatch batch;
@@ -31,6 +39,7 @@ public class GameScreen implements Screen {
     private PlayerController playerController;
     private Player player;
     private House house;
+    private List<Resource> trail = new ArrayList<>();
 
     // Lighting
     private World world;
@@ -79,6 +88,11 @@ public class GameScreen implements Screen {
 
     @Override
     public void render(float delta) {
+        if (state == State.GAMEOVER) {
+            renderGameOver();
+            return;
+        }
+
         // Update logic
         float dx = playerController.getHorizontalInput();
         float dy = playerController.getVerticalInput();
@@ -86,6 +100,13 @@ public class GameScreen implements Screen {
         
         entityManager.update(delta);
         monsterSystem.update(delta, player);
+
+        if (player.getHp() <= 0) {
+            state = State.GAMEOVER;
+        }
+
+        // Click to Mine
+        handleMining();
 
         // Smooth Camera Follow (LERP)
         float lerp = 5f;
@@ -124,6 +145,37 @@ public class GameScreen implements Screen {
         renderUI();
     }
 
+    private void handleMining() {
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            Vector3 worldCoords = camera.unproject(new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0));
+            for (Entity e : entityManager.getEntities()) {
+                if (e instanceof Resource && !((Resource) e).isMined()) {
+                    if (worldCoords.x >= e.getPosition().x && worldCoords.x <= e.getPosition().x + e.getSize().x &&
+                        worldCoords.y >= e.getPosition().y && worldCoords.y <= e.getPosition().y + e.getSize().y) {
+                        
+                        // Check if player is near
+                        if (player.getPosition().dst(e.getPosition()) < 50) {
+                            Resource r = (Resource) e;
+                            Entity followTarget = trail.isEmpty() ? player : trail.get(trail.size() - 1);
+                            r.setMined(true, followTarget);
+                            trail.add(r);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void renderGameOver() {
+        ScreenUtils.clear(0.1f, 0, 0, 1f); // Dark red screen
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 320, 180);
+        batch.begin();
+        // Visual "X" or dead icon instead of words
+        batch.setColor(Color.WHITE);
+        batch.draw(Resources.pixelTexture, 150, 80, 20, 20); // Placeholder "dead" box
+        batch.end();
+    }
+
     private void renderHomeIndicator(float delta) {
         float batteryPct = player.getBatteryLevel() / player.getMaxBattery();
         if (batteryPct < 0.25f) {
@@ -146,34 +198,18 @@ public class GameScreen implements Screen {
 
     private void checkInteractions(float delta) {
         // Recharge if near house
-        House house = null;
-        for (Entity e : entityManager.getEntities()) {
-            if (e instanceof House) {
-                house = (House) e;
-                break;
-            }
-        }
-
-        if (house != null) {
-            float dist = player.getPosition().dst(house.getPosition());
-            if (dist < 40) { // Near enough to recharge
-                player.recharge(delta);
-            }
-        }
-
-        // Mine resources
-        Entity toRemove = null;
-        for (Entity e : entityManager.getEntities()) {
-            if (e instanceof Resource) {
-                float dist = player.getPosition().dst(e.getPosition());
-                if (dist < 16) {
-                    toRemove = e;
-                    break;
+        float dist = player.getPosition().dst(house.getPosition());
+        if (dist < 40) { // Near enough to recharge
+            player.recharge(delta);
+            
+            // Deposit ores
+            if (!trail.isEmpty()) {
+                for (Resource r : trail) {
+                    entityManager.removeEntity(r);
                 }
+                trail.clear();
+                player.heal(delta * 20); // Healing when at house
             }
-        }
-        if (toRemove != null) {
-            entityManager.removeEntity(toRemove);
         }
     }
 
@@ -196,6 +232,13 @@ public class GameScreen implements Screen {
             batch.setColor(Color.RED);
         }
         batch.draw(Resources.pixelTexture, 11, 161, 48 * batteryPct, 8);
+
+        // Draw HP bar
+        batch.setColor(Color.DARK_GRAY);
+        batch.draw(Resources.pixelTexture, 10, 145, 50, 10);
+        batch.setColor(Color.SCARLET);
+        float hpPct = player.getHp() / player.getMaxHp();
+        batch.draw(Resources.pixelTexture, 11, 146, 48 * hpPct, 8);
         
         // Reset color for other renderings
         batch.setColor(Color.WHITE);
@@ -225,5 +268,7 @@ public class GameScreen implements Screen {
     @Override
     public void dispose() {
         batch.dispose();
+        rayHandler.dispose();
+        world.dispose();
     }
 }

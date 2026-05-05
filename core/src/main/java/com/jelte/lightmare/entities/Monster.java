@@ -5,6 +5,7 @@ import com.badlogic.gdx.math.Vector2;
 
 public class Monster extends Entity {
     private float speed = 40f;
+    private float damagePerSecond = 10f;
     private boolean active = true;
 
     public Monster(float x, float y, Texture texture) {
@@ -30,12 +31,15 @@ public class Monster extends Entity {
             // Flee from player
             Vector2 fleeDir = position.cpy().sub(player.getPosition()).nor();
             position.add(fleeDir.scl(speed * 2 * delta));
-            
-            // If too deep in light, maybe they take damage or just flee faster
         } else {
             // Move towards player
             Vector2 moveDir = player.getPosition().cpy().sub(position).nor();
             position.add(moveDir.scl(speed * delta));
+            
+            // Attack if close
+            if (distToPlayer < 12) {
+                player.takeDamage(damagePerSecond * delta);
+            }
         }
     }
 }
