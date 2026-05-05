@@ -75,6 +75,11 @@ public class GameScreen implements Screen {
         
         entityManager.update(delta);
 
+        // Smooth Camera Follow (LERP)
+        float lerp = 5f;
+        camera.position.x += (player.getPosition().x + 8 - camera.position.x) * lerp * delta;
+        camera.position.y += (player.getPosition().y + 8 - camera.position.y) * lerp * delta;
+
         // Update lights
         playerLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
         playerLight.setDistance(player.getLightRadius());
@@ -90,15 +95,14 @@ public class GameScreen implements Screen {
 
         batch.begin();
         entityManager.render(batch);
-        
-        // UI: Battery bar (Wordless)
-        renderUI();
-        
         batch.end();
 
         // Render Lights
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
+
+        // UI: Battery bar (Wordless) - Rendered in screen space
+        renderUI();
     }
 
     private void checkInteractions(float delta) {
@@ -135,6 +139,10 @@ public class GameScreen implements Screen {
     }
 
     private void renderUI() {
+        // Use a temporary matrix to draw UI in screen space (ignoring camera move)
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 320, 180);
+        batch.begin();
+
         // Draw battery background (dark gray)
         batch.setColor(Color.DARK_GRAY);
         batch.draw(Resources.pixelTexture, 10, 160, 50, 10);
@@ -152,6 +160,10 @@ public class GameScreen implements Screen {
         
         // Reset color for other renderings
         batch.setColor(Color.WHITE);
+        batch.end();
+
+        // Restore camera projection for next frame
+        batch.setProjectionMatrix(camera.combined);
     }
 
     @Override
