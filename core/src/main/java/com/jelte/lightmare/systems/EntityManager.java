@@ -44,4 +44,8 @@ public class EntityManager {
     public void removeEntity(Entity entity) {
         entities.remove(entity);
     }
+
+    public House getHouse() {
+        return house;
+    }
 }

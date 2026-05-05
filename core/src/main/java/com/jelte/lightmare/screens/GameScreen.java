@@ -15,15 +15,18 @@ import com.jelte.lightmare.Resources;
 import com.jelte.lightmare.entities.Entity;
 import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
+import com.jelte.lightmare.entities.Monster;
 import com.jelte.lightmare.entities.Resource;
 import com.jelte.lightmare.input.PlayerController;
 import com.jelte.lightmare.systems.EntityManager;
+import com.jelte.lightmare.systems.MonsterSystem;
 
 public class GameScreen implements Screen {
     private OrthographicCamera camera;
     private Viewport viewport;
     private SpriteBatch batch;
     private EntityManager entityManager;
+    private MonsterSystem monsterSystem;
     private PlayerController playerController;
     private Player player;
 
@@ -38,6 +41,7 @@ public class GameScreen implements Screen {
         viewport = new FitViewport(320, 180, camera);
         batch = new SpriteBatch();
         entityManager = new EntityManager();
+        monsterSystem = new MonsterSystem(entityManager);
         playerController = new PlayerController();
 
         // Physics & Lighting setup
@@ -74,6 +78,7 @@ public class GameScreen implements Screen {
         player.move(dx, dy, delta);
         
         entityManager.update(delta);
+        monsterSystem.update(delta, player);
 
         // Smooth Camera Follow (LERP)
         float lerp = 5f;
