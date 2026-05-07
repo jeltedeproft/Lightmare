@@ -8,6 +8,7 @@ import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -16,6 +17,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.jelte.lightmare.Resources;
+import com.jelte.lightmare.Shaders;
 import com.jelte.lightmare.entities.Entity;
 import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
@@ -47,6 +49,7 @@ public class GameScreen implements Screen {
     private PointLight playerLight;
     private PointLight emergencyLight;
     private PointLight houseLight;
+    private ShaderProgram ditherShader;
 
     // UI Effects
     private float pulseTimer = 0;
@@ -63,6 +66,9 @@ public class GameScreen implements Screen {
         world = new World(new Vector2(0, 0), true);
         rayHandler = new RayHandler(world);
         rayHandler.setAmbientLight(0.05f, 0.05f, 0.1f, 0.1f); // Very dark blue night
+        
+        ditherShader = Shaders.createDitherShader();
+        rayHandler.setLightShader(ditherShader);
 
         // Setup initial world
         house = new House(140, 70, Resources.houseTexture);
@@ -138,6 +144,9 @@ public class GameScreen implements Screen {
         batch.end();
 
         // Render Lights
+        ditherShader.bind();
+        ditherShader.setUniformf("u_resolution", Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
 
@@ -285,5 +294,6 @@ public class GameScreen implements Screen {
         batch.dispose();
         rayHandler.dispose();
         world.dispose();
+        ditherShader.dispose();
     }
 }
