@@ -7,8 +7,11 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture.TextureFilter;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -17,7 +20,6 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.jelte.lightmare.Resources;
-import com.jelte.lightmare.Shaders;
 import com.jelte.lightmare.entities.Entity;
 import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
@@ -33,7 +35,11 @@ public class GameScreen implements Screen {
     private enum State { PLAYING, GAMEOVER }
     private State state = State.PLAYING;
 
+    private static final int VIRTUAL_WIDTH = 640;
+    private static final int VIRTUAL_HEIGHT = 360;
+
     private OrthographicCamera camera;
+    private OrthographicCamera fboCamera;
     private Viewport viewport;
     private SpriteBatch batch;
     private EntityManager entityManager;
@@ -49,14 +55,26 @@ public class GameScreen implements Screen {
     private PointLight playerLight;
     private PointLight emergencyLight;
     private PointLight houseLight;
-    private ShaderProgram ditherShader;
+
+    // Pixel-art render target
+    private FrameBuffer gameFbo;
+    private TextureRegion fboRegion;
 
     // UI Effects
     private float pulseTimer = 0;
 
     public GameScreen() {
         camera = new OrthographicCamera();
-        viewport = new FitViewport(320, 180, camera);
+        viewport = new FitViewport(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, camera);
+
+        fboCamera = new OrthographicCamera();
+        fboCamera.setToOrtho(false, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+
+        gameFbo = new FrameBuffer(Pixmap.Format.RGBA8888, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, false);
+        gameFbo.getColorBufferTexture().setFilter(TextureFilter.Nearest, TextureFilter.Nearest);
+        fboRegion = new TextureRegion(gameFbo.getColorBufferTexture(), 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        fboRegion.flip(false, true);
+
         batch = new SpriteBatch();
         entityManager = new EntityManager();
         monsterSystem = new MonsterSystem(entityManager);
@@ -66,9 +84,10 @@ public class GameScreen implements Screen {
         world = new World(new Vector2(0, 0), true);
         rayHandler = new RayHandler(world);
         rayHandler.setAmbientLight(0.05f, 0.05f, 0.1f, 0.1f); // Very dark blue night
-        
-        ditherShader = Shaders.createDitherShader();
-        rayHandler.setLightShader(ditherShader);
+        // Render lights directly into our low-res FBO instead of box2dlight's
+        // internal full-resolution lightmap, so light edges snap to the world pixel grid.
+        rayHandler.setShadows(false);
+        rayHandler.setBlur(false);
 
         // Setup initial world
         house = new House(140, 70, Resources.houseTexture);
@@ -129,26 +148,34 @@ public class GameScreen implements Screen {
         // Interaction logic
         checkInteractions(delta);
 
-        // Rendering
-        ScreenUtils.clear(0, 0, 0, 1f); // Clear to absolute black
+        // === FBO PASS: render world + lights at virtual resolution ===
+        gameFbo.begin();
+        Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        ScreenUtils.clear(0, 0, 0, 1f);
 
         camera.update();
         batch.setProjectionMatrix(camera.combined);
 
         batch.begin();
         entityManager.render(batch);
-        
-        // Render Home Indicator Pulse
         renderHomeIndicator(delta);
-        
         batch.end();
 
-        // Render Lights
-        ditherShader.bind();
-        ditherShader.setUniformf("u_resolution", Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
+
+        gameFbo.end();
+
+        // === SCREEN PASS: blit FBO to screen with letterboxed nearest-neighbor scaling ===
+        viewport.apply(true);
+        ScreenUtils.clear(0, 0, 0, 1f);
+
+        fboCamera.update();
+        batch.setProjectionMatrix(fboCamera.combined);
+        batch.begin();
+        batch.setColor(Color.WHITE);
+        batch.draw(fboRegion, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        batch.end();
 
         // UI: Battery bar (Wordless) - Rendered in screen space
         renderUI();
@@ -181,20 +208,20 @@ public class GameScreen implements Screen {
         ScreenUtils.clear(0.1f, 0, 0, 1f); // Dark red screen
         
         // Reset camera to center of virtual screen for UI
-        camera.position.set(160, 90, 0);
+        camera.position.set(320, 180, 0);
         camera.update();
-        
+
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
         // Visual "X" or dead icon instead of words
         batch.setColor(Color.WHITE);
-        batch.draw(Resources.restartTexture, 144, 74, 32, 32); 
+        batch.draw(Resources.restartTexture, 304, 164, 32, 32);
         batch.end();
 
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
             Vector3 uiCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            viewport.unproject(uiCoords); 
-            if (uiCoords.x >= 144 && uiCoords.x <= 176 && uiCoords.y >= 74 && uiCoords.y <= 106) {
+            viewport.unproject(uiCoords);
+            if (uiCoords.x >= 304 && uiCoords.x <= 336 && uiCoords.y >= 164 && uiCoords.y <= 196) {
                 ((com.badlogic.gdx.Game)Gdx.app.getApplicationListener()).setScreen(new GameScreen());
             }
         }
@@ -294,6 +321,6 @@ public class GameScreen implements Screen {
         batch.dispose();
         rayHandler.dispose();
         world.dispose();
-        ditherShader.dispose();
+        gameFbo.dispose();
     }
 }
