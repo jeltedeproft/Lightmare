@@ -170,7 +170,12 @@ public class GameScreen implements Screen {
 
     private void renderGameOver() {
         ScreenUtils.clear(0.1f, 0, 0, 1f); // Dark red screen
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, 320, 180);
+        
+        // Reset camera to center of virtual screen for UI
+        camera.position.set(160, 90, 0);
+        camera.update();
+        
+        batch.setProjectionMatrix(camera.combined);
         batch.begin();
         // Visual "X" or dead icon instead of words
         batch.setColor(Color.WHITE);
@@ -179,7 +184,6 @@ public class GameScreen implements Screen {
 
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
             Vector3 uiCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            // Since we are in 320x180 virtual space for the restart button
             viewport.unproject(uiCoords); 
             if (uiCoords.x >= 144 && uiCoords.x <= 176 && uiCoords.y >= 74 && uiCoords.y <= 106) {
                 ((com.badlogic.gdx.Game)Gdx.app.getApplicationListener()).setScreen(new GameScreen());
