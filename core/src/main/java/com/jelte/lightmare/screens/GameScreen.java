@@ -41,6 +41,7 @@ public class GameScreen implements Screen {
     private OrthographicCamera camera;
     private OrthographicCamera fboCamera;
     private Viewport viewport;
+    private float cameraTargetX, cameraTargetY;
     private SpriteBatch batch;
     private EntityManager entityManager;
     private MonsterSystem monsterSystem;
@@ -92,7 +93,10 @@ public class GameScreen implements Screen {
         // Setup initial world
         house = new House(140, 70, Resources.houseTexture);
         player = new Player(156, 80, Resources.playerTexture);
-        
+
+        cameraTargetX = player.getPosition().x + 8;
+        cameraTargetY = player.getPosition().y + 8;
+
         entityManager.addEntity(house);
         entityManager.addEntity(player);
 
@@ -133,10 +137,23 @@ public class GameScreen implements Screen {
         // Click to Mine
         handleMining();
 
-        // Smooth Camera Follow (LERP)
+        // Smooth Camera Follow (LERP) — keep float precision in cameraTargetX/Y
+        // and snap to integer pixels at render time to avoid sub-pixel jitter on
+        // the low-res FBO. Snap-to-target within half a pixel so the asymptotic
+        // lerp tail doesn't keep nudging the rounded position back and forth
+        // when the player is standing still.
         float lerp = 5f;
-        camera.position.x += (player.getPosition().x + 8 - camera.position.x) * lerp * delta;
-        camera.position.y += (player.getPosition().y + 8 - camera.position.y) * lerp * delta;
+        float targetX = player.getPosition().x + 8;
+        float targetY = player.getPosition().y + 8;
+        float dxCam = targetX - cameraTargetX;
+        float dyCam = targetY - cameraTargetY;
+        if (dxCam * dxCam + dyCam * dyCam < 0.25f) {
+            cameraTargetX = targetX;
+            cameraTargetY = targetY;
+        } else {
+            cameraTargetX += dxCam * lerp * delta;
+            cameraTargetY += dyCam * lerp * delta;
+        }
 
         // Update lights
         playerLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
@@ -153,6 +170,8 @@ public class GameScreen implements Screen {
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0, 0, 0, 1f);
 
+        camera.position.x = MathUtils.round(cameraTargetX);
+        camera.position.y = MathUtils.round(cameraTargetY);
         camera.update();
         batch.setProjectionMatrix(camera.combined);
 
