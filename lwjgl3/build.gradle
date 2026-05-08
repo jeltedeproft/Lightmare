@@ -1,0 +1,40 @@
+// Native desktop launcher (LWJGL3). Used for fast iteration during
+// development. The GWT/HTML5 build remains the shipping target — verify
+// changes in super dev before publishing to itch.io.
+
+apply plugin: 'application'
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+sourceSets.main.resources.srcDirs += [ rootProject.file('assets').path ]
+
+application {
+    mainClass = 'com.jelte.lightmare.lwjgl3.Lwjgl3Launcher'
+}
+
+eclipse.project.name = appName + '-lwjgl3'
+
+java.sourceCompatibility = JavaVersion.VERSION_11
+java.targetCompatibility = JavaVersion.VERSION_11
+
+dependencies {
+    implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+    implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+    implementation "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-desktop"
+    implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
+    implementation project(':core')
+}
+
+import org.gradle.internal.os.OperatingSystem
+
+run {
+    // Run from the assets folder so Gdx.files.internal("...") resolves to
+    // the same paths as it does in the GWT build (which also serves from /assets).
+    workingDir = rootProject.file('assets').path
+    setIgnoreExitValue(true)
+
+    // macOS requires LWJGL to be initialized on the first thread.
+    if (OperatingSystem.current() == OperatingSystem.MAC_OS) {
+        jvmArgs += "-XstartOnFirstThread"
+    }
+}

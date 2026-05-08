@@ -8,11 +8,16 @@ import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.Texture.TextureFilter;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.maps.tiled.TiledMap;
+import com.badlogic.gdx.maps.tiled.TmxMapLoader;
+import com.badlogic.gdx.maps.tiled.renderers.OrthogonalTiledMapRenderer;
+import com.jelte.lightmare.maps.InfiniteTmxMapLoader;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -79,6 +84,10 @@ public class GameScreen implements Screen {
     private TextureRegion fboRegion;
     private ShaderProgram ditherShader;
 
+    // Tiled background
+    private TiledMap tiledMap;
+    private OrthogonalTiledMapRenderer mapRenderer;
+
     // UI Effects
     private float pulseTimer = 0;
 
@@ -95,6 +104,15 @@ public class GameScreen implements Screen {
         fboRegion.flip(false, true);
 
         ditherShader = Shaders.createDitherShader();
+
+        // Tiled background. Force nearest filter on the tileset so it stays
+        // crisp through the FBO upscale (the default is Linear, which would
+        // blur the pixel art).
+        TmxMapLoader.Parameters mapParams = new TmxMapLoader.Parameters();
+        mapParams.textureMinFilter = Texture.TextureFilter.Nearest;
+        mapParams.textureMagFilter = Texture.TextureFilter.Nearest;
+        tiledMap = new InfiniteTmxMapLoader().load("map/map.tmx", mapParams);
+        mapRenderer = new OrthogonalTiledMapRenderer(tiledMap);
 
         batch = new SpriteBatch();
         entityManager = new EntityManager();
@@ -237,10 +255,17 @@ public class GameScreen implements Screen {
         camera.position.y = MathUtils.round(cameraTargetY + shakeY);
         camera.update();
 
-        // === FBO PASS: sprites then dithered lights, both into gameFbo ===
+        // === FBO PASS: tilemap, sprites, then dithered lights, all into gameFbo ===
         gameFbo.begin();
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0, 0, 0, 1f);
+
+        // Tilemap background — only when outside; interior view fully replaces
+        // the world view with house walls/floor.
+        if (!playerInside) {
+            mapRenderer.setView(camera);
+            mapRenderer.render();
+        }
 
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
@@ -463,5 +488,7 @@ public class GameScreen implements Screen {
         world.dispose();
         gameFbo.dispose();
         ditherShader.dispose();
+        mapRenderer.dispose();
+        tiledMap.dispose();
     }
 }
