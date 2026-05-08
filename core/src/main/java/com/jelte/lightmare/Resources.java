@@ -1,26 +1,45 @@
 package com.jelte.lightmare;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 
 public class Resources {
-    public static Texture playerTexture;
+    // Programmatic placeholders that are still used (house tint, monster, UI bits).
     public static Texture houseTexture;
     public static Texture monsterTexture;
-    public static Texture resourceTexture;
     public static Texture pixelTexture;
     public static Texture arrowTexture;
     public static Texture restartTexture;
 
+    // Sprite atlas for hand-drawn art.
+    public static TextureAtlas atlas;
+    public static TextureRegion playerRegion;
+    /** rock_blue, rock_green, rock_orange, rock_purple — pick a random index per spawn. */
+    public static TextureRegion[] oreRegions;
+    public static String[] oreNames = {"rock_blue", "rock_green", "rock_orange", "rock_purple"};
+
     public static void load() {
-        playerTexture = createColoredTexture(16, 16, Color.YELLOW);
         houseTexture = createColoredTexture(48, 48, Color.BROWN);
         monsterTexture = createColoredTexture(16, 16, Color.RED);
-        resourceTexture = createColoredTexture(16, 16, Color.GRAY);
         pixelTexture = createColoredTexture(1, 1, Color.WHITE);
         arrowTexture = createArrowTexture(64, 64, Color.WHITE); // Higher res
         restartTexture = createRestartTexture(128, 128, Color.WHITE); // Higher res
+
+        atlas = new TextureAtlas(Gdx.files.internal("sprites/lightmare.atlas"));
+        // Pixel-art sprites must use Nearest filtering or they blur through the
+        // FBO upscale — the atlas defaults to Linear unless we force it.
+        for (Texture t : atlas.getTextures()) {
+            t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        }
+        playerRegion = atlas.findRegion("lilguy");
+        oreRegions = new TextureRegion[oreNames.length];
+        for (int i = 0; i < oreNames.length; i++) {
+            oreRegions[i] = atlas.findRegion(oreNames[i]);
+        }
     }
 
     private static Texture createColoredTexture(int width, int height, Color color) {
@@ -74,12 +93,11 @@ public class Resources {
     }
 
     public static void dispose() {
-        playerTexture.dispose();
         houseTexture.dispose();
         monsterTexture.dispose();
-        resourceTexture.dispose();
         pixelTexture.dispose();
         arrowTexture.dispose();
         restartTexture.dispose();
+        if (atlas != null) atlas.dispose();
     }
 }

@@ -1,6 +1,7 @@
 package com.jelte.lightmare.entities;
 
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Vector2;
 
 public class Resource extends Entity {
@@ -13,6 +14,10 @@ public class Resource extends Entity {
 
     public Resource(float x, float y, Texture texture) {
         super(x, y, 16, 16, texture);
+    }
+
+    public Resource(float x, float y, TextureRegion region) {
+        super(x, y, 16, 16, region);
     }
 
     @Override

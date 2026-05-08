@@ -91,7 +91,9 @@ public class ResourceSystem {
             float y = cy + MathUtils.random(-CLUSTER_RADIUS, CLUSTER_RADIUS);
             if (!isPositionValid(x, y)) continue;
 
-            entityManager.addEntity(new Resource(x, y, Resources.resourceTexture));
+            // Random ore variant per spawn, using the four atlas regions.
+            int variant = MathUtils.random(Resources.oreRegions.length - 1);
+            entityManager.addEntity(new Resource(x, y, Resources.oreRegions[variant]));
             spawned++;
         }
     }

@@ -147,7 +147,7 @@ public class GameScreen implements Screen {
         float houseY = mapCenterY - House.HEIGHT * 0.5f;
         house = new House(houseX, houseY, Resources.houseTexture);
         // Player spawns inside the house at the same relative offset as before.
-        player = new Player(houseX + 16, houseY + 10, Resources.playerTexture);
+        player = new Player(houseX + 16, houseY + 10, Resources.playerRegion);
 
         cameraTargetX = player.getPosition().x + 8;
         cameraTargetY = player.getPosition().y + 8;
