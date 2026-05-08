@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.maps.tiled.TiledMap;
+import com.badlogic.gdx.maps.tiled.TiledMapTileLayer;
 import com.badlogic.gdx.maps.tiled.TmxMapLoader;
 import com.badlogic.gdx.maps.tiled.renderers.OrthogonalTiledMapRenderer;
 import com.jelte.lightmare.maps.InfiniteTmxMapLoader;
@@ -87,6 +88,9 @@ public class GameScreen implements Screen {
     // Tiled background
     private TiledMap tiledMap;
     private OrthogonalTiledMapRenderer mapRenderer;
+    private TiledMapTileLayer rocksLayer;
+    private int mapTileWidth;
+    private int mapTileHeight;
 
     // UI Effects
     private float pulseTimer = 0;
@@ -111,8 +115,11 @@ public class GameScreen implements Screen {
         TmxMapLoader.Parameters mapParams = new TmxMapLoader.Parameters();
         mapParams.textureMinFilter = Texture.TextureFilter.Nearest;
         mapParams.textureMagFilter = Texture.TextureFilter.Nearest;
-        tiledMap = new InfiniteTmxMapLoader().load("map/map.tmx", mapParams);
+        tiledMap = new InfiniteTmxMapLoader().load("map/map2.tmx", mapParams);
         mapRenderer = new OrthogonalTiledMapRenderer(tiledMap);
+        rocksLayer = (TiledMapTileLayer) tiledMap.getLayers().get("rocks");
+        mapTileWidth = tiledMap.getProperties().get("tilewidth", Integer.class);
+        mapTileHeight = tiledMap.getProperties().get("tileheight", Integer.class);
 
         batch = new SpriteBatch();
         entityManager = new EntityManager();
@@ -129,9 +136,18 @@ public class GameScreen implements Screen {
         rayHandler.setBlur(false);
         rayHandler.setLightShader(ditherShader);
 
-        // Setup initial world
-        house = new House(140, 70, Resources.houseTexture);
-        player = new Player(156, 80, Resources.playerTexture);
+        // Setup initial world — house centered on the map so the painted area
+        // surrounds the player evenly. Using the TMX dimensions means this keeps
+        // working if the map is resized in Tiled.
+        int mapTilesWide = tiledMap.getProperties().get("width", Integer.class);
+        int mapTilesTall = tiledMap.getProperties().get("height", Integer.class);
+        float mapCenterX = mapTilesWide * mapTileWidth * 0.5f;
+        float mapCenterY = mapTilesTall * mapTileHeight * 0.5f;
+        float houseX = mapCenterX - House.WIDTH * 0.5f;
+        float houseY = mapCenterY - House.HEIGHT * 0.5f;
+        house = new House(houseX, houseY, Resources.houseTexture);
+        // Player spawns inside the house at the same relative offset as before.
+        player = new Player(houseX + 16, houseY + 10, Resources.playerTexture);
 
         cameraTargetX = player.getPosition().x + 8;
         cameraTargetY = player.getPosition().y + 8;
@@ -174,8 +190,8 @@ public class GameScreen implements Screen {
         // Update logic
         float dx = playerController.getHorizontalInput();
         float dy = playerController.getVerticalInput();
-        player.move(dx, dy, delta);
-        
+        player.move(dx, dy, delta, this::isBlockedByRocks);
+
         entityManager.update(delta);
         monsterSystem.update(delta, player);
         resourceSystem.update(delta, player);
@@ -311,7 +327,7 @@ public class GameScreen implements Screen {
                 if (e instanceof Resource && !((Resource) e).isMined()) {
                     if (worldCoords.x >= e.getPosition().x && worldCoords.x <= e.getPosition().x + e.getSize().x &&
                         worldCoords.y >= e.getPosition().y && worldCoords.y <= e.getPosition().y + e.getSize().y) {
-                        
+
                         // Check if player is near
                         if (player.getPosition().dst(e.getPosition()) < 50) {
                             Resource r = (Resource) e;
@@ -336,7 +352,7 @@ public class GameScreen implements Screen {
 
     private void renderGameOver() {
         ScreenUtils.clear(0.1f, 0, 0, 1f); // Dark red screen
-        
+
         // Reset camera to center of virtual screen for UI
         camera.position.set(320, 180, 0);
         camera.update();
@@ -362,19 +378,43 @@ public class GameScreen implements Screen {
         if (batteryPct < 0.25f) {
             pulseTimer += delta * (1.0f - batteryPct) * 10f; // Pulses faster when lower
             float alpha = 0.3f + 0.4f * MathUtils.sin(pulseTimer);
-            
+
             // Calculate angle to house
             float angle = MathUtils.atan2(house.getCenterY() - (player.getPosition().y + 8),
                                          house.getCenterX() - (player.getPosition().x + 8)) * MathUtils.radiansToDegrees;
-            
+
             batch.setColor(1, 1, 1, alpha);
             // Draw arrow 32 pixels away from player toward house
             float arrowX = player.getPosition().x + 8 + MathUtils.cosDeg(angle) * 32 - 8;
             float arrowY = player.getPosition().y + 8 + MathUtils.sinDeg(angle) * 32 - 8;
-            
+
             batch.draw(Resources.arrowTexture, arrowX, arrowY, 8, 8, 16, 16, 1, 1, angle - 90, 0, 0, 16, 16, false, false);
             batch.setColor(Color.WHITE);
         }
+    }
+
+    /**
+     * AABB-vs-rocks-layer test. Any non-empty cell in the "rocks" layer is
+     * treated as solid. We sample every tile the AABB overlaps, so the player
+     * never clips into a rock regardless of which corner enters first.
+     */
+    private boolean isBlockedByRocks(float x, float y, float w, float h) {
+        if (rocksLayer == null) return false;
+
+        // -1e-3 on the max edge so an AABB exactly on a tile boundary doesn't
+        // claim to overlap the next tile (would over-block on perfect alignment).
+        int minTileX = (int) Math.floor(x / mapTileWidth);
+        int maxTileX = (int) Math.floor((x + w - 0.001f) / mapTileWidth);
+        int minTileY = (int) Math.floor(y / mapTileHeight);
+        int maxTileY = (int) Math.floor((y + h - 0.001f) / mapTileHeight);
+
+        for (int ty = minTileY; ty <= maxTileY; ty++) {
+            for (int tx = minTileX; tx <= maxTileX; tx++) {
+                TiledMapTileLayer.Cell cell = rocksLayer.getCell(tx, ty);
+                if (cell != null && cell.getTile() != null) return true;
+            }
+        }
+        return false;
     }
 
     private void renderInsideView() {
@@ -437,7 +477,7 @@ public class GameScreen implements Screen {
         // Draw battery background (dark gray)
         batch.setColor(Color.DARK_GRAY);
         batch.draw(Resources.pixelTexture, 10, 160, 50, 10);
-        
+
         // Draw battery level (green to red based on level)
         float batteryPct = player.getBatteryLevel() / player.getMaxBattery();
         if (batteryPct > 0.5f) {
@@ -455,7 +495,7 @@ public class GameScreen implements Screen {
         batch.setColor(Color.SCARLET);
         float hpPct = player.getHp() / player.getMaxHp();
         batch.draw(Resources.pixelTexture, 11, 146, 48 * hpPct, 8);
-        
+
         // Reset color for other renderings
         batch.setColor(Color.WHITE);
         batch.end();

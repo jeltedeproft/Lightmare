@@ -3,6 +3,12 @@ package com.jelte.lightmare.entities;
 import com.badlogic.gdx.graphics.Texture;
 
 public class Player extends Entity {
+    /** Tells the move() method whether a candidate AABB is solid. Implementations
+     *  typically check tile layers, entity overlaps, etc. */
+    public interface CollisionChecker {
+        boolean isBlocked(float x, float y, float w, float h);
+    }
+
     private float batteryLevel = 100f;
     private final float maxBattery = 100f;
     private float lightRadius = 50f;
@@ -25,12 +31,28 @@ public class Player extends Entity {
     }
 
     public void move(float dx, float dy, float delta) {
-        if (dx != 0 || dy != 0) {
-            float length = (float) Math.sqrt(dx * dx + dy * dy);
-            dx /= length;
-            dy /= length;
-            position.x += dx * speed * delta;
-            position.y += dy * speed * delta;
+        move(dx, dy, delta, null);
+    }
+
+    /**
+     * Axis-separated movement so the player slides along walls instead of
+     * sticking. Each axis tries the proposed step; if the resulting AABB is
+     * blocked by the checker, that axis stays put while the other still moves.
+     */
+    public void move(float dx, float dy, float delta, CollisionChecker checker) {
+        if (dx == 0f && dy == 0f) return;
+        float length = (float) Math.sqrt(dx * dx + dy * dy);
+        dx /= length;
+        dy /= length;
+
+        float stepX = dx * speed * delta;
+        float stepY = dy * speed * delta;
+
+        if (checker == null || !checker.isBlocked(position.x + stepX, position.y, size.x, size.y)) {
+            position.x += stepX;
+        }
+        if (checker == null || !checker.isBlocked(position.x, position.y + stepY, size.x, size.y)) {
+            position.y += stepY;
         }
     }
 
