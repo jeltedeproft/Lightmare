@@ -1,0 +1,11 @@
+lightmare.png
+size:128,32
+repeat:none
+rock_blue
+bounds:38,2,16,16
+rock_green
+bounds:56,2,16,16
+rock_orange
+bounds:20,2,16,16
+rock_purple
+bounds:2,2,16,16
