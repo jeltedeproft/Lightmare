@@ -30,6 +30,7 @@ import com.jelte.lightmare.entities.Resource;
 import com.jelte.lightmare.input.PlayerController;
 import com.jelte.lightmare.systems.EntityManager;
 import com.jelte.lightmare.systems.MonsterSystem;
+import com.jelte.lightmare.systems.ResourceSystem;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,6 +48,7 @@ public class GameScreen implements Screen {
     private SpriteBatch batch;
     private EntityManager entityManager;
     private MonsterSystem monsterSystem;
+    private ResourceSystem resourceSystem;
     private PlayerController playerController;
     private Player player;
     private House house;
@@ -114,10 +116,10 @@ public class GameScreen implements Screen {
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
-        // Add some resources
-        entityManager.addEntity(new Resource(50, 50, Resources.resourceTexture));
-        entityManager.addEntity(new Resource(250, 150, Resources.resourceTexture));
-        entityManager.addEntity(new Resource(200, 30, Resources.resourceTexture));
+        // Procedural ore spawning: a starting cluster near the player, then the
+        // ResourceSystem keeps a target count seeded around them as they wander.
+        resourceSystem = new ResourceSystem(entityManager, house);
+        resourceSystem.seedInitial(player);
     }
 
     @Override
@@ -138,6 +140,7 @@ public class GameScreen implements Screen {
         
         entityManager.update(delta);
         monsterSystem.update(delta, player);
+        resourceSystem.update(delta, player);
 
         if (player.getHp() <= 0) {
             state = State.GAMEOVER;
