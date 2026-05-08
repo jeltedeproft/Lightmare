@@ -98,8 +98,8 @@ public class ResourceSystem {
     private boolean isPositionValid(float x, float y) {
         // House occupies roughly a 48x48 footprint at its origin; treat its center
         // as origin + (24, 24) and keep a buffer around it.
-        float hx = house.getPosition().x + 24f;
-        float hy = house.getPosition().y + 24f;
+        float hx = house.getCenterX();
+        float hy = house.getCenterY();
         float hdx = x - hx;
         float hdy = y - hy;
         if (hdx * hdx + hdy * hdy < HOUSE_BUFFER * HOUSE_BUFFER) return false;

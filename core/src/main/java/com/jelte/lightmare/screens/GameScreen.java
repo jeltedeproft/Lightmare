@@ -59,6 +59,9 @@ public class GameScreen implements Screen {
     private float shakeTimer = 0f;
     private float prevHp;
     private float flickerTimer = 0f;
+
+    // House interior state
+    private boolean playerInside = false;
     private Player player;
     private House house;
     private List<Resource> trail = new ArrayList<>();
@@ -121,7 +124,7 @@ public class GameScreen implements Screen {
         // Add lights
         // Monochrome lights — color is white, alpha controls relative strength
         // so the composite dither operates on a single brightness channel.
-        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), 100, house.getPosition().x + 24, house.getPosition().y + 24);
+        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), 100, house.getCenterX(), house.getCenterY());
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
@@ -170,6 +173,9 @@ public class GameScreen implements Screen {
         if (player.getHp() <= 0) {
             state = State.GAMEOVER;
         }
+
+        // Test player against house bounds (use sprite center) for the inside-view toggle.
+        playerInside = house.containsPoint(player.getPosition().x + 8, player.getPosition().y + 8);
 
         // Click to Mine
         handleMining();
@@ -238,7 +244,11 @@ public class GameScreen implements Screen {
 
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
-        entityManager.render(batch);
+        if (playerInside) {
+            renderInsideView();
+        } else {
+            entityManager.render(batch);
+        }
         particleSystem.render(batch);
         renderHomeIndicator(delta);
         batch.end();
@@ -329,8 +339,8 @@ public class GameScreen implements Screen {
             float alpha = 0.3f + 0.4f * MathUtils.sin(pulseTimer);
             
             // Calculate angle to house
-            float angle = MathUtils.atan2(house.getPosition().y + 24 - (player.getPosition().y + 8), 
-                                         house.getPosition().x + 24 - (player.getPosition().x + 8)) * MathUtils.radiansToDegrees;
+            float angle = MathUtils.atan2(house.getCenterY() - (player.getPosition().y + 8),
+                                         house.getCenterX() - (player.getPosition().x + 8)) * MathUtils.radiansToDegrees;
             
             batch.setColor(1, 1, 1, alpha);
             // Draw arrow 32 pixels away from player toward house
@@ -342,13 +352,38 @@ public class GameScreen implements Screen {
         }
     }
 
+    private void renderInsideView() {
+        // Outside world: rendered dim so the player still has spatial context
+        // ("the outside world disappears a bit") but the focus is the interior.
+        batch.setColor(0.3f, 0.3f, 0.3f, 1f);
+        for (Entity e : entityManager.getEntities()) {
+            if (e == house || e == player) continue;
+            e.render(batch);
+        }
+
+        // House interior — replace the dark roof tint with a lighter "floor".
+        batch.setColor(0.55f, 0.4f, 0.25f, 1f);
+        batch.draw(Resources.houseTexture,
+            house.getPosition().x, house.getPosition().y,
+            house.getSize().x, house.getSize().y);
+
+        // Placeholder storage rectangle (darker, near the back wall).
+        batch.setColor(0.25f, 0.18f, 0.1f, 1f);
+        float storW = 24f, storH = 14f;
+        float storX = house.getPosition().x + (house.getSize().x - storW) * 0.5f;
+        float storY = house.getPosition().y + house.getSize().y - storH - 8f;
+        batch.draw(Resources.pixelTexture, storX, storY, storW, storH);
+
+        batch.setColor(Color.WHITE);
+        player.render(batch);
+    }
+
     private void checkInteractions(float delta) {
-        // Recharge if near house
-        float dist = player.getPosition().dst(house.getPosition());
-        if (dist < 40) { // Near enough to recharge
+        // Recharge / deposit happens whenever the player is actually inside the
+        // house. Uses the same flag the renderer uses for the interior view.
+        if (playerInside) {
             player.recharge(delta);
-            
-            // Deposit ores
+
             if (!trail.isEmpty()) {
                 for (Resource r : trail) {
                     entityManager.removeEntity(r);
