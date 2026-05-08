@@ -6,6 +6,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -79,10 +80,15 @@ public class GameScreen implements Screen {
     private PointLight emergencyLight;
     private PointLight houseLight;
 
-    // Pixel-art render target — sprites and lights both render into this FBO,
-    // and the dither happens inside the box2dlights light shader.
+    // Pixel-art render targets. The world is drawn at full brightness into
+    // gameFbo. Lights (with the dither shader) are drawn additively into a
+    // separate lightFbo cleared to black, producing a "light intensity mask".
+    // We then multiply gameFbo by lightFbo so unlit areas go pitch black and
+    // lit areas reveal the world's actual colors.
     private FrameBuffer gameFbo;
+    private FrameBuffer lightFbo;
     private TextureRegion fboRegion;
+    private TextureRegion lightFboRegion;
     private ShaderProgram ditherShader;
 
     // Tiled background
@@ -106,6 +112,11 @@ public class GameScreen implements Screen {
         gameFbo.getColorBufferTexture().setFilter(TextureFilter.Nearest, TextureFilter.Nearest);
         fboRegion = new TextureRegion(gameFbo.getColorBufferTexture(), 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         fboRegion.flip(false, true);
+
+        lightFbo = new FrameBuffer(Pixmap.Format.RGBA8888, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, false);
+        lightFbo.getColorBufferTexture().setFilter(TextureFilter.Nearest, TextureFilter.Nearest);
+        lightFboRegion = new TextureRegion(lightFbo.getColorBufferTexture(), 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        lightFboRegion.flip(false, true);
 
         ditherShader = Shaders.createDitherShader();
 
@@ -271,13 +282,11 @@ public class GameScreen implements Screen {
         camera.position.y = MathUtils.round(cameraTargetY + shakeY);
         camera.update();
 
-        // === FBO PASS: tilemap, sprites, then dithered lights, all into gameFbo ===
+        // === WORLD PASS: tilemap + entities into gameFbo at full brightness ===
         gameFbo.begin();
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0, 0, 0, 1f);
 
-        // Tilemap background — only when outside; interior view fully replaces
-        // the world view with house walls/floor.
         if (!playerInside) {
             mapRenderer.setView(camera);
             mapRenderer.render();
@@ -293,9 +302,34 @@ public class GameScreen implements Screen {
         particleSystem.render(batch);
         renderHomeIndicator(delta);
         batch.end();
+        gameFbo.end();
 
+        // === LIGHT PASS: dithered lights into lightFbo cleared to ambient ===
+        // ambient = (0,0,0) means unlit areas multiply to pure black later.
+        // Bumping the clear color (e.g., 0.05) gives a faint baseline visibility
+        // — useful if "complete darkness" feels too punishing.
+        lightFbo.begin();
+        Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        ScreenUtils.clear(0f, 0f, 0f, 1f);
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
+        lightFbo.end();
+
+        // === COMPOSITE: gameFbo *= lightFbo ===
+        // (GL_DST_COLOR, GL_ZERO) = pure multiplicative. Each gameFbo pixel is
+        // multiplied by the corresponding lightFbo pixel: black light → black
+        // world (invisible), white light → world unchanged. The dither shader's
+        // kept/discarded pattern in the light FBO becomes the visible reveal.
+        gameFbo.begin();
+        Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        fboCamera.update();
+        batch.setProjectionMatrix(fboCamera.combined);
+        batch.setBlendFunction(GL20.GL_DST_COLOR, GL20.GL_ZERO);
+        batch.begin();
+        batch.setColor(Color.WHITE);
+        batch.draw(lightFboRegion, 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+        batch.end();
+        batch.setBlendFunction(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         gameFbo.end();
 
         // === SCREEN PASS: blit FBO with letterboxed nearest-neighbor scaling ===
@@ -527,6 +561,7 @@ public class GameScreen implements Screen {
         rayHandler.dispose();
         world.dispose();
         gameFbo.dispose();
+        lightFbo.dispose();
         ditherShader.dispose();
         mapRenderer.dispose();
         tiledMap.dispose();
