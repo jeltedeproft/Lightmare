@@ -3,8 +3,8 @@ package com.jelte.lightmare.entities;
 import com.badlogic.gdx.graphics.Texture;
 
 public class House extends Entity {
-    public static final float WIDTH = 64f;
-    public static final float HEIGHT = 64f;
+    public static final float WIDTH = 192f;
+    public static final float HEIGHT = 128f;
 
     private float lightRadius = 100f;
 

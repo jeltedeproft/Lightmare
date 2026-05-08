@@ -33,7 +33,8 @@ public class ResourceSystem {
     private static final float CLUSTER_RADIUS = 28f;
 
     private static final float MIN_SEPARATION = 18f;
-    private static final float HOUSE_BUFFER = 60f;
+    // Padding around the house's bounding box (rectangular keep-out zone).
+    private static final float HOUSE_BUFFER = 32f;
 
     private final EntityManager entityManager;
     private final House house;
@@ -96,13 +97,15 @@ public class ResourceSystem {
     }
 
     private boolean isPositionValid(float x, float y) {
-        // House occupies roughly a 48x48 footprint at its origin; treat its center
-        // as origin + (24, 24) and keep a buffer around it.
-        float hx = house.getCenterX();
-        float hy = house.getCenterY();
-        float hdx = x - hx;
-        float hdy = y - hy;
-        if (hdx * hdx + hdy * hdy < HOUSE_BUFFER * HOUSE_BUFFER) return false;
+        // Rectangular keep-out around the house bounding box. Radial checks
+        // don't fit a non-square house — corners would be inside the radius
+        // even when ore is well outside the actual building footprint.
+        Vector2 hp = house.getPosition();
+        Vector2 hs = house.getSize();
+        if (x >= hp.x - HOUSE_BUFFER && x <= hp.x + hs.x + HOUSE_BUFFER
+            && y >= hp.y - HOUSE_BUFFER && y <= hp.y + hs.y + HOUSE_BUFFER) {
+            return false;
+        }
 
         float sep2 = MIN_SEPARATION * MIN_SEPARATION;
         for (Entity e : entityManager.getEntities()) {

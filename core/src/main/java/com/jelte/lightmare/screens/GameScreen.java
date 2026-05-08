@@ -353,25 +353,35 @@ public class GameScreen implements Screen {
     }
 
     private void renderInsideView() {
-        // Outside world: rendered dim so the player still has spatial context
-        // ("the outside world disappears a bit") but the focus is the interior.
-        batch.setColor(0.3f, 0.3f, 0.3f, 1f);
-        for (Entity e : entityManager.getEntities()) {
-            if (e == house || e == player) continue;
-            e.render(batch);
-        }
+        // Outside entities are skipped entirely — when you step indoors, the
+        // doors close and you can't see the outside world. The FBO's black
+        // clear stays where outside-the-house pixels would otherwise be drawn.
+        Vector2 hp = house.getPosition();
+        Vector2 hs = house.getSize();
+        float wallThickness = 8f;
 
-        // House interior — replace the dark roof tint with a lighter "floor".
-        batch.setColor(0.55f, 0.4f, 0.25f, 1f);
-        batch.draw(Resources.houseTexture,
-            house.getPosition().x, house.getPosition().y,
-            house.getSize().x, house.getSize().y);
+        // Walls — fill the whole house footprint with a dark brown.
+        batch.setColor(0.28f, 0.18f, 0.08f, 1f);
+        batch.draw(Resources.pixelTexture, hp.x, hp.y, hs.x, hs.y);
 
-        // Placeholder storage rectangle (darker, near the back wall).
-        batch.setColor(0.25f, 0.18f, 0.1f, 1f);
-        float storW = 24f, storH = 14f;
-        float storX = house.getPosition().x + (house.getSize().x - storW) * 0.5f;
-        float storY = house.getPosition().y + house.getSize().y - storH - 8f;
+        // Floor — lighter, inset by wallThickness on all sides.
+        batch.setColor(0.55f, 0.4f, 0.22f, 1f);
+        batch.draw(Resources.pixelTexture,
+            hp.x + wallThickness, hp.y + wallThickness,
+            hs.x - 2f * wallThickness, hs.y - 2f * wallThickness);
+
+        // Door gap at the bottom-center of the south wall — visual cue for
+        // where the player walked in (and where they walk out).
+        float doorW = 32f;
+        float doorX = hp.x + (hs.x - doorW) * 0.5f;
+        batch.setColor(0.65f, 0.5f, 0.28f, 1f);
+        batch.draw(Resources.pixelTexture, doorX, hp.y, doorW, wallThickness);
+
+        // Placeholder storage chest near the back (north) wall.
+        batch.setColor(0.18f, 0.1f, 0.04f, 1f);
+        float storW = 40f, storH = 22f;
+        float storX = hp.x + (hs.x - storW) * 0.5f;
+        float storY = hp.y + hs.y - wallThickness - storH - 12f;
         batch.draw(Resources.pixelTexture, storX, storY, storW, storH);
 
         batch.setColor(Color.WHITE);
