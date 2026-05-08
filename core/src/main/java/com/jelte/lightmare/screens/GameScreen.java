@@ -30,6 +30,7 @@ import com.jelte.lightmare.entities.Resource;
 import com.jelte.lightmare.input.PlayerController;
 import com.jelte.lightmare.systems.EntityManager;
 import com.jelte.lightmare.systems.MonsterSystem;
+import com.jelte.lightmare.systems.ParticleSystem;
 import com.jelte.lightmare.systems.ResourceSystem;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,7 +50,15 @@ public class GameScreen implements Screen {
     private EntityManager entityManager;
     private MonsterSystem monsterSystem;
     private ResourceSystem resourceSystem;
+    private ParticleSystem particleSystem;
     private PlayerController playerController;
+
+    // Juice
+    private static final float SHAKE_DURATION = 0.2f;
+    private float shakeIntensity = 0f;
+    private float shakeTimer = 0f;
+    private float prevHp;
+    private float flickerTimer = 0f;
     private Player player;
     private House house;
     private List<Resource> trail = new ArrayList<>();
@@ -120,6 +129,14 @@ public class GameScreen implements Screen {
         // ResourceSystem keeps a target count seeded around them as they wander.
         resourceSystem = new ResourceSystem(entityManager, house);
         resourceSystem.seedInitial(player);
+
+        particleSystem = new ParticleSystem();
+        prevHp = player.getHp();
+    }
+
+    private void triggerShake(float intensity) {
+        shakeIntensity = intensity;
+        shakeTimer = SHAKE_DURATION;
     }
 
     @Override
@@ -141,6 +158,14 @@ public class GameScreen implements Screen {
         entityManager.update(delta);
         monsterSystem.update(delta, player);
         resourceSystem.update(delta, player);
+        particleSystem.update(delta);
+
+        // Monster contact deals continuous tick damage. Any HP drop this frame
+        // refreshes the screen-shake — when contact breaks, shake decays out.
+        if (player.getHp() < prevHp) {
+            triggerShake(1.0f);
+        }
+        prevHp = player.getHp();
 
         if (player.getHp() <= 0) {
             state = State.GAMEOVER;
@@ -171,17 +196,39 @@ public class GameScreen implements Screen {
         }
 
         // Update lights
+        flickerTimer += delta;
+        float lightDist = player.getLightRadius();
+        float battPct = player.getBatteryLevel() / player.getMaxBattery();
+        if (battPct < 0.1f) {
+            // Below 10% battery: light flickers, harder the closer to empty.
+            // Sin gives a dying-bulb pulse, random adds the irregular jitter.
+            float intensity = 1f - battPct / 0.1f; // 0 at 10%, 1 at 0%
+            float flicker = 1f
+                + 0.15f * intensity * MathUtils.sin(flickerTimer * 35f)
+                + 0.1f * intensity * MathUtils.random(-1f, 1f);
+            lightDist *= flicker;
+        }
         playerLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
-        playerLight.setDistance(player.getLightRadius());
-        
+        playerLight.setDistance(lightDist);
+
         emergencyLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight.setDistance(player.getEmergencyLightRadius());
 
         // Interaction logic
         checkInteractions(delta);
 
-        camera.position.x = MathUtils.round(cameraTargetX);
-        camera.position.y = MathUtils.round(cameraTargetY);
+        // Compute shake offset (decays linearly from intensity to 0 over SHAKE_DURATION).
+        float shakeX = 0f, shakeY = 0f;
+        if (shakeTimer > 0f) {
+            shakeTimer -= delta;
+            if (shakeTimer < 0f) shakeTimer = 0f;
+            float amount = shakeIntensity * (shakeTimer / SHAKE_DURATION);
+            shakeX = MathUtils.random(-amount, amount);
+            shakeY = MathUtils.random(-amount, amount);
+        }
+
+        camera.position.x = MathUtils.round(cameraTargetX + shakeX);
+        camera.position.y = MathUtils.round(cameraTargetY + shakeY);
         camera.update();
 
         // === FBO PASS: sprites then dithered lights, both into gameFbo ===
@@ -192,6 +239,7 @@ public class GameScreen implements Screen {
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
         entityManager.render(batch);
+        particleSystem.render(batch);
         renderHomeIndicator(delta);
         batch.end();
 
@@ -232,10 +280,17 @@ public class GameScreen implements Screen {
                         // Check if player is near
                         if (player.getPosition().dst(e.getPosition()) < 50) {
                             Resource r = (Resource) e;
-                            if (r.click()) {
+                            boolean finished = r.click();
+                            // Per-click particle burst; shake on the finishing click.
+                            particleSystem.burst(
+                                r.getPosition().x + r.getSize().x / 2f,
+                                r.getPosition().y + r.getSize().y / 2f,
+                                MathUtils.random(4, 5));
+                            if (finished) {
                                 Entity followTarget = trail.isEmpty() ? player : trail.get(trail.size() - 1);
                                 r.setMined(true, followTarget);
                                 trail.add(r);
+                                triggerShake(2.5f);
                             }
                         }
                     }
