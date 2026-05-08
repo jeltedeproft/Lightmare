@@ -197,7 +197,10 @@ public class GameScreen implements Screen {
         gameFbo.end();
 
         // === SCREEN PASS: blit FBO with letterboxed nearest-neighbor scaling ===
-        viewport.apply(true);
+        // apply(false): set the letterboxed GL viewport without re-centering the
+        // world camera. apply(true) would clobber camera.position to (320, 180)
+        // and break next frame's handleMining() unproject.
+        viewport.apply(false);
         ScreenUtils.clear(0, 0, 0, 1f);
 
         fboCamera.update();
@@ -213,7 +216,11 @@ public class GameScreen implements Screen {
 
     private void handleMining() {
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
-            Vector3 worldCoords = camera.unproject(new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0));
+            // viewport.unproject uses the letterboxed GL viewport (not the full
+            // canvas), so clicks map correctly even when the window aspect
+            // doesn't match 16:9. camera.unproject(Vector3) would be wrong then.
+            Vector3 worldCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            viewport.unproject(worldCoords);
             for (Entity e : entityManager.getEntities()) {
                 if (e instanceof Resource && !((Resource) e).isMined()) {
                     if (worldCoords.x >= e.getPosition().x && worldCoords.x <= e.getPosition().x + e.getSize().x &&
