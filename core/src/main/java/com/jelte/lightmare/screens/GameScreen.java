@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.Texture.TextureFilter;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -20,6 +21,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.jelte.lightmare.Resources;
+import com.jelte.lightmare.Shaders;
 import com.jelte.lightmare.entities.Entity;
 import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
@@ -57,9 +59,11 @@ public class GameScreen implements Screen {
     private PointLight emergencyLight;
     private PointLight houseLight;
 
-    // Pixel-art render target
+    // Pixel-art render target — sprites and lights both render into this FBO,
+    // and the dither happens inside the box2dlights light shader.
     private FrameBuffer gameFbo;
     private TextureRegion fboRegion;
+    private ShaderProgram ditherShader;
 
     // UI Effects
     private float pulseTimer = 0;
@@ -76,6 +80,8 @@ public class GameScreen implements Screen {
         fboRegion = new TextureRegion(gameFbo.getColorBufferTexture(), 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         fboRegion.flip(false, true);
 
+        ditherShader = Shaders.createDitherShader();
+
         batch = new SpriteBatch();
         entityManager = new EntityManager();
         monsterSystem = new MonsterSystem(entityManager);
@@ -84,11 +90,12 @@ public class GameScreen implements Screen {
         // Physics & Lighting setup
         world = new World(new Vector2(0, 0), true);
         rayHandler = new RayHandler(world);
-        rayHandler.setAmbientLight(0.05f, 0.05f, 0.1f, 0.1f); // Very dark blue night
         // Render lights directly into our low-res FBO instead of box2dlight's
-        // internal full-resolution lightmap, so light edges snap to the world pixel grid.
+        // internal full-resolution lightmap, so the dither shader runs at the
+        // FBO pixel grid (otherwise the lightmap upscale blurs the dither).
         rayHandler.setShadows(false);
         rayHandler.setBlur(false);
+        rayHandler.setLightShader(ditherShader);
 
         // Setup initial world
         house = new House(140, 70, Resources.houseTexture);
@@ -101,9 +108,11 @@ public class GameScreen implements Screen {
         entityManager.addEntity(player);
 
         // Add lights
-        houseLight = new PointLight(rayHandler, 128, new Color(1, 0.9f, 0.7f, 0.8f), 100, house.getPosition().x + 24, house.getPosition().y + 24);
-        playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 0.8f, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
-        emergencyLight = new PointLight(rayHandler, 32, new Color(0.2f, 0.2f, 0.5f, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
+        // Monochrome lights — color is white, alpha controls relative strength
+        // so the composite dither operates on a single brightness channel.
+        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), 100, house.getPosition().x + 24, house.getPosition().y + 24);
+        playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
+        emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
         // Add some resources
         entityManager.addEntity(new Resource(50, 50, Resources.resourceTexture));
@@ -139,10 +148,13 @@ public class GameScreen implements Screen {
 
         // Smooth Camera Follow (LERP) — keep float precision in cameraTargetX/Y
         // and snap to integer pixels at render time to avoid sub-pixel jitter on
-        // the low-res FBO. Snap-to-target within half a pixel so the asymptotic
-        // lerp tail doesn't keep nudging the rounded position back and forth
-        // when the player is standing still.
-        float lerp = 5f;
+        // the low-res FBO. While the player holds input, ease gently. The
+        // moment input releases, switch to a much faster lerp so the tail
+        // collapses in ~100ms instead of dragging out ~800ms — otherwise the
+        // rounded render position keeps stepping by 1 FBO pixel per frame
+        // during the tail and the light circles visibly shake.
+        boolean playerIdle = (dx == 0f && dy == 0f);
+        float lerp = playerIdle ? 20f : 5f;
         float targetX = player.getPosition().x + 8;
         float targetY = player.getPosition().y + 8;
         float dxCam = targetX - cameraTargetX;
@@ -165,16 +177,16 @@ public class GameScreen implements Screen {
         // Interaction logic
         checkInteractions(delta);
 
-        // === FBO PASS: render world + lights at virtual resolution ===
+        camera.position.x = MathUtils.round(cameraTargetX);
+        camera.position.y = MathUtils.round(cameraTargetY);
+        camera.update();
+
+        // === FBO PASS: sprites then dithered lights, both into gameFbo ===
         gameFbo.begin();
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0, 0, 0, 1f);
 
-        camera.position.x = MathUtils.round(cameraTargetX);
-        camera.position.y = MathUtils.round(cameraTargetY);
-        camera.update();
         batch.setProjectionMatrix(camera.combined);
-
         batch.begin();
         entityManager.render(batch);
         renderHomeIndicator(delta);
@@ -182,10 +194,9 @@ public class GameScreen implements Screen {
 
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
-
         gameFbo.end();
 
-        // === SCREEN PASS: blit FBO to screen with letterboxed nearest-neighbor scaling ===
+        // === SCREEN PASS: blit FBO with letterboxed nearest-neighbor scaling ===
         viewport.apply(true);
         ScreenUtils.clear(0, 0, 0, 1f);
 
@@ -341,5 +352,6 @@ public class GameScreen implements Screen {
         rayHandler.dispose();
         world.dispose();
         gameFbo.dispose();
+        ditherShader.dispose();
     }
 }
