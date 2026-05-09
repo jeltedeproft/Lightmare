@@ -93,7 +93,7 @@ public class ResourceSystem {
 
             // Random ore variant per spawn, using the four atlas regions.
             int variant = MathUtils.random(Resources.oreRegions.length - 1);
-            entityManager.addEntity(new Resource(x, y, Resources.oreRegions[variant]));
+            entityManager.addEntity(new Resource(x, y, Resources.oreRegions[variant], variant));
             spawned++;
         }
     }

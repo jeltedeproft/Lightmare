@@ -11,6 +11,8 @@ public class Resource extends Entity {
     private Entity followTarget;
     private float followSpeed = 150f;
     private float stopDistance = 12f;
+    /** Index into Resources.oreRegions / storage chests (0..3). */
+    private int variant = 0;
 
     public Resource(float x, float y, Texture texture) {
         super(x, y, 16, 16, texture);
@@ -18,6 +20,15 @@ public class Resource extends Entity {
 
     public Resource(float x, float y, TextureRegion region) {
         super(x, y, 16, 16, region);
+    }
+
+    public Resource(float x, float y, TextureRegion region, int variant) {
+        super(x, y, 16, 16, region);
+        this.variant = variant;
+    }
+
+    public int getVariant() {
+        return variant;
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 
@@ -21,6 +22,9 @@ public class Resources {
     /** rock_blue, rock_green, rock_orange, rock_purple — pick a random index per spawn. */
     public static TextureRegion[] oreRegions;
     public static String[] oreNames = {"rock_blue", "rock_green", "rock_orange", "rock_purple"};
+
+    // Default lsans-15 bundled with libGDX (loaded from classpath, works on GWT).
+    public static BitmapFont font;
 
     public static void load() {
         houseTexture = createColoredTexture(48, 48, Color.BROWN);
@@ -40,6 +44,12 @@ public class Resources {
         for (int i = 0; i < oreNames.length; i++) {
             oreRegions[i] = atlas.findRegion(oreNames[i]);
         }
+
+        // Default bitmap font. Scale to 0.5 so it sits sensibly at the 640x360
+        // virtual resolution (15px → ~7.5px tall in world space).
+        font = new BitmapFont();
+        font.setUseIntegerPositions(true);
+        font.getData().setScale(0.5f);
     }
 
     private static Texture createColoredTexture(int width, int height, Color color) {
@@ -99,5 +109,6 @@ public class Resources {
         arrowTexture.dispose();
         restartTexture.dispose();
         if (atlas != null) atlas.dispose();
+        if (font != null) font.dispose();
     }
 }

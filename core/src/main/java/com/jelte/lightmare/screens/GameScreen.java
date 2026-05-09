@@ -69,6 +69,15 @@ public class GameScreen implements Screen {
 
     // House interior state
     private boolean playerInside = false;
+    /** Tinted bodies for the 4 storage chests, parallel to Resources.oreRegions. */
+    private static final Color[] STORAGE_COLORS = {
+        new Color(0.25f, 0.45f, 0.75f, 1f),  // blue
+        new Color(0.30f, 0.60f, 0.30f, 1f),  // green
+        new Color(0.85f, 0.55f, 0.20f, 1f),  // orange
+        new Color(0.55f, 0.25f, 0.65f, 1f),  // purple
+    };
+    /** Per-variant count of deposited ore. Indexed same as Resources.oreRegions. */
+    private final int[] storageCounts = new int[4];
     private Player player;
     private House house;
     private List<Resource> trail = new ArrayList<>();
@@ -476,12 +485,37 @@ public class GameScreen implements Screen {
         batch.setColor(0.65f, 0.5f, 0.28f, 1f);
         batch.draw(Resources.pixelTexture, doorX, hp.y, doorW, wallThickness);
 
-        // Placeholder storage chest near the back (north) wall.
-        batch.setColor(0.18f, 0.1f, 0.04f, 1f);
-        float storW = 40f, storH = 22f;
-        float storX = hp.x + (hs.x - storW) * 0.5f;
-        float storY = hp.y + hs.y - wallThickness - storH - 12f;
-        batch.draw(Resources.pixelTexture, storX, storY, storW, storH);
+        // Four storage chests along the back wall, one per ore variant.
+        // Chest body is tinted to match the ore color, the ore sprite sits on
+        // top, and the deposited count is drawn above each chest.
+        int n = STORAGE_COLORS.length;
+        float chestW = 26f;
+        float chestH = 18f;
+        float chestPad = (hs.x - n * chestW) / (n + 1);
+        float chestY = hp.y + hs.y - wallThickness - chestH - 12f;
+
+        for (int i = 0; i < n; i++) {
+            float chestX = hp.x + chestPad + i * (chestW + chestPad);
+
+            // Chest body
+            batch.setColor(STORAGE_COLORS[i]);
+            batch.draw(Resources.pixelTexture, chestX, chestY, chestW, chestH);
+
+            // Ore icon sitting on the chest
+            batch.setColor(Color.WHITE);
+            float oreSize = 14f;
+            float oreX = chestX + (chestW - oreSize) * 0.5f;
+            float oreY = chestY + (chestH - oreSize) * 0.5f;
+            batch.draw(Resources.oreRegions[i], oreX, oreY, oreSize, oreSize);
+
+            // Count above the chest. BitmapFont.draw places text by its baseline
+            // so we offset upward by the (scaled) line height.
+            String text = String.valueOf(storageCounts[i]);
+            float textWidth = text.length() * 3.5f; // rough advance for scaled lsans-15
+            Resources.font.draw(batch, text,
+                chestX + (chestW - textWidth) * 0.5f,
+                chestY + chestH + 10f);
+        }
 
         batch.setColor(Color.WHITE);
         player.render(batch);
@@ -495,6 +529,10 @@ public class GameScreen implements Screen {
 
             if (!trail.isEmpty()) {
                 for (Resource r : trail) {
+                    int v = r.getVariant();
+                    if (v >= 0 && v < storageCounts.length) {
+                        storageCounts[v]++;
+                    }
                     entityManager.removeEntity(r);
                 }
                 trail.clear();
