@@ -6,7 +6,7 @@ public class House extends Entity {
     public static final float WIDTH = 192f;
     public static final float HEIGHT = 128f;
 
-    private float lightRadius = 100f;
+    private float lightRadius = 240f;
 
     public House(float x, float y, Texture texture) {
         super(x, y, WIDTH, HEIGHT, texture);

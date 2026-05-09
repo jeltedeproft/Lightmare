@@ -169,7 +169,7 @@ public class GameScreen implements Screen {
         // Add lights
         // Monochrome lights — color is white, alpha controls relative strength
         // so the composite dither operates on a single brightness channel.
-        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), 100, house.getCenterX(), house.getCenterY());
+        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), house.getLightRadius(), house.getCenterX(), house.getCenterY());
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 

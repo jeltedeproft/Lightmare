@@ -12,7 +12,7 @@ public class Player extends Entity {
 
     private float batteryLevel = 100f;
     private final float maxBattery = 100f;
-    private float lightRadius = 50f;
+    private float lightRadius = 120f;
     private float speed = 100f;
     private float hp = 100f;
     private final float maxHp = 100f;
