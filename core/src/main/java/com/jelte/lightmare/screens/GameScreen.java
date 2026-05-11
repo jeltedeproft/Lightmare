@@ -37,6 +37,7 @@ import com.jelte.lightmare.entities.Resource;
 import com.jelte.lightmare.input.PlayerController;
 import com.jelte.lightmare.systems.EntityManager;
 import com.jelte.lightmare.systems.MonsterSystem;
+import com.jelte.lightmare.systems.MusicSystem;
 import com.jelte.lightmare.systems.ParticleSystem;
 import com.jelte.lightmare.systems.ResourceSystem;
 import java.util.ArrayList;
@@ -58,6 +59,7 @@ public class GameScreen implements Screen {
     private MonsterSystem monsterSystem;
     private ResourceSystem resourceSystem;
     private ParticleSystem particleSystem;
+    private MusicSystem musicSystem;
     private PlayerController playerController;
 
     // Juice
@@ -190,7 +192,23 @@ public class GameScreen implements Screen {
         resourceSystem.seedInitial(player);
 
         particleSystem = new ParticleSystem();
+        musicSystem = new MusicSystem();
+        // Music start is deferred to render() — browsers (and HTML5/GWT in
+        // particular) block audio playback until the user has interacted with
+        // the page, so calling play() from the constructor throws NotAllowedError.
         prevHp = player.getHp();
+    }
+
+    private boolean musicStarted = false;
+
+    private void tryStartMusic() {
+        if (musicStarted) return;
+        boolean hasInput = Gdx.input.justTouched()
+            || Gdx.input.isKeyPressed(com.badlogic.gdx.Input.Keys.ANY_KEY);
+        if (hasInput) {
+            musicSystem.start();
+            musicStarted = true;
+        }
     }
 
     private void triggerShake(float intensity) {
@@ -208,6 +226,8 @@ public class GameScreen implements Screen {
             renderGameOver();
             return;
         }
+
+        tryStartMusic();
 
         // Update logic
         float dx = playerController.getHorizontalInput();

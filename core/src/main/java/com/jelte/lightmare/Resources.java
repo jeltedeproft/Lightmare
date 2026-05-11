@@ -1,6 +1,7 @@
 package com.jelte.lightmare;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.audio.Music;
 import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -8,6 +9,8 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Resources {
     // Programmatic placeholders that are still used (house tint, UI bits).
@@ -30,6 +33,8 @@ public class Resources {
     // Audio
     public static Sound mineSound;
     public static Sound powerUpSound;
+    public static Music[] musicTracks;
+    private static final String MUSIC_DIR = "audio/music/";
 
     // Default lsans-15 bundled with libGDX (loaded from classpath, works on GWT).
     public static BitmapFont font;
@@ -59,11 +64,33 @@ public class Resources {
         mineSound = Gdx.audio.newSound(Gdx.files.internal("audio/mine.wav"));
         powerUpSound = Gdx.audio.newSound(Gdx.files.internal("audio/powerUp.wav"));
 
+        musicTracks = loadMusicTracks();
+
         // Default bitmap font. Scale to 0.5 so it sits sensibly at the 640x360
         // virtual resolution (15px → ~7.5px tall in world space).
         font = new BitmapFont();
         font.setUseIntegerPositions(true);
         font.getData().setScale(0.5f);
+    }
+
+    /**
+     * Pull every file under audio/music/ from the build-generated assets.txt
+     * manifest. Listing a directory at runtime doesn't work on GWT (the
+     * preloader only knows files it preloaded), but the manifest is a plain
+     * text file that ships to every platform — so this works on desktop and
+     * html with no per-track maintenance.
+     */
+    private static Music[] loadMusicTracks() {
+        if (!Gdx.files.internal("assets.txt").exists()) return new Music[0];
+        String manifest = Gdx.files.internal("assets.txt").readString();
+        List<Music> tracks = new ArrayList<>();
+        for (String line : manifest.split("\\r?\\n")) {
+            line = line.trim();
+            if (line.length() > MUSIC_DIR.length() && line.startsWith(MUSIC_DIR)) {
+                tracks.add(Gdx.audio.newMusic(Gdx.files.internal(line)));
+            }
+        }
+        return tracks.toArray(new Music[0]);
     }
 
     private static Texture createColoredTexture(int width, int height, Color color) {
@@ -125,5 +152,10 @@ public class Resources {
         if (font != null) font.dispose();
         if (mineSound != null) mineSound.dispose();
         if (powerUpSound != null) powerUpSound.dispose();
+        if (musicTracks != null) {
+            for (Music m : musicTracks) {
+                if (m != null) m.dispose();
+            }
+        }
     }
 }
