@@ -1,6 +1,6 @@
 package com.jelte.lightmare.entities;
 
-import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Vector2;
 
 public class Monster extends Entity {
@@ -12,8 +12,8 @@ public class Monster extends Entity {
     private float fleeTimer = 0;
     private final float fleeDuration = 1.5f;
 
-    public Monster(float x, float y, Texture texture) {
-        super(x, y, 16, 16, texture);
+    public Monster(float x, float y, TextureRegion region) {
+        super(x, y, 16, 16, region);
     }
 
     @Override

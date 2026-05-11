@@ -1,6 +1,7 @@
 package com.jelte.lightmare;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -9,26 +10,32 @@ import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 
 public class Resources {
-    // Programmatic placeholders that are still used (house tint, monster, UI bits).
+    // Programmatic placeholders that are still used (house tint, UI bits).
     public static Texture houseTexture;
-    public static Texture monsterTexture;
     public static Texture pixelTexture;
     public static Texture arrowTexture;
     public static Texture restartTexture;
 
     // Sprite atlas for hand-drawn art.
     public static TextureAtlas atlas;
-    public static TextureRegion playerRegion;
+    public static TextureRegion playerFront;
+    public static TextureRegion playerBack;
+    public static TextureRegion playerLeft;
+    public static TextureRegion playerRight;
+    public static TextureRegion skullguyRegion;
     /** rock_blue, rock_green, rock_orange, rock_purple — pick a random index per spawn. */
     public static TextureRegion[] oreRegions;
     public static String[] oreNames = {"rock_blue", "rock_green", "rock_orange", "rock_purple"};
+
+    // Audio
+    public static Sound mineSound;
+    public static Sound powerUpSound;
 
     // Default lsans-15 bundled with libGDX (loaded from classpath, works on GWT).
     public static BitmapFont font;
 
     public static void load() {
         houseTexture = createColoredTexture(48, 48, Color.BROWN);
-        monsterTexture = createColoredTexture(16, 16, Color.RED);
         pixelTexture = createColoredTexture(1, 1, Color.WHITE);
         arrowTexture = createArrowTexture(64, 64, Color.WHITE); // Higher res
         restartTexture = createRestartTexture(128, 128, Color.WHITE); // Higher res
@@ -39,11 +46,18 @@ public class Resources {
         for (Texture t : atlas.getTextures()) {
             t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         }
-        playerRegion = atlas.findRegion("lilguy");
+        playerFront = atlas.findRegion("lilguyFront");
+        playerBack = atlas.findRegion("lilguyBack");
+        playerLeft = atlas.findRegion("lilguyLeft");
+        playerRight = atlas.findRegion("lilguyRight");
+        skullguyRegion = atlas.findRegion("skullguy");
         oreRegions = new TextureRegion[oreNames.length];
         for (int i = 0; i < oreNames.length; i++) {
             oreRegions[i] = atlas.findRegion(oreNames[i]);
         }
+
+        mineSound = Gdx.audio.newSound(Gdx.files.internal("audio/mine.wav"));
+        powerUpSound = Gdx.audio.newSound(Gdx.files.internal("audio/powerUp.wav"));
 
         // Default bitmap font. Scale to 0.5 so it sits sensibly at the 640x360
         // virtual resolution (15px → ~7.5px tall in world space).
@@ -104,11 +118,12 @@ public class Resources {
 
     public static void dispose() {
         houseTexture.dispose();
-        monsterTexture.dispose();
         pixelTexture.dispose();
         arrowTexture.dispose();
         restartTexture.dispose();
         if (atlas != null) atlas.dispose();
         if (font != null) font.dispose();
+        if (mineSound != null) mineSound.dispose();
+        if (powerUpSound != null) powerUpSound.dispose();
     }
 }

@@ -167,7 +167,9 @@ public class GameScreen implements Screen {
         float houseY = mapCenterY - House.HEIGHT * 0.5f;
         house = new House(houseX, houseY, Resources.houseTexture);
         // Player spawns inside the house at the same relative offset as before.
-        player = new Player(houseX + 16, houseY + 10, Resources.playerRegion);
+        player = new Player(houseX + 16, houseY + 10,
+            Resources.playerFront, Resources.playerBack,
+            Resources.playerLeft, Resources.playerRight);
 
         cameraTargetX = player.getPosition().x + 8;
         cameraTargetY = player.getPosition().y + 8;
@@ -375,6 +377,7 @@ public class GameScreen implements Screen {
                         if (player.getPosition().dst(e.getPosition()) < 50) {
                             Resource r = (Resource) e;
                             boolean finished = r.click();
+                            Resources.mineSound.play();
                             // Per-click particle burst; shake on the finishing click.
                             particleSystem.burst(
                                 r.getPosition().x + r.getSize().x / 2f,
@@ -536,6 +539,7 @@ public class GameScreen implements Screen {
                     entityManager.removeEntity(r);
                 }
                 trail.clear();
+                Resources.powerUpSound.play();
                 player.heal(delta * 20); // Healing when at house
             }
         }

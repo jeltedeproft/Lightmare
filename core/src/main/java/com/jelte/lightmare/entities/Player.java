@@ -1,6 +1,5 @@
 package com.jelte.lightmare.entities;
 
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 
 public class Player extends Entity {
@@ -10,6 +9,8 @@ public class Player extends Entity {
         boolean isBlocked(float x, float y, float w, float h);
     }
 
+    public enum Facing { UP, DOWN, LEFT, RIGHT }
+
     private float batteryLevel = 100f;
     private final float maxBattery = 100f;
     private float lightRadius = 120f;
@@ -17,12 +18,19 @@ public class Player extends Entity {
     private float hp = 100f;
     private final float maxHp = 100f;
 
-    public Player(float x, float y, Texture texture) {
-        super(x, y, 16, 16, texture);
-    }
+    private final TextureRegion regionFront;
+    private final TextureRegion regionBack;
+    private final TextureRegion regionLeft;
+    private final TextureRegion regionRight;
+    private Facing facing = Facing.DOWN;
 
-    public Player(float x, float y, TextureRegion region) {
-        super(x, y, 16, 16, region);
+    public Player(float x, float y, TextureRegion front, TextureRegion back,
+                  TextureRegion left, TextureRegion right) {
+        super(x, y, 16, 16, front);
+        this.regionFront = front;
+        this.regionBack = back;
+        this.regionLeft = left;
+        this.regionRight = right;
     }
 
     @Override
@@ -46,6 +54,16 @@ public class Player extends Entity {
      */
     public void move(float dx, float dy, float delta, CollisionChecker checker) {
         if (dx == 0f && dy == 0f) return;
+
+        // Dominant axis wins so diagonal input picks a single facing sprite
+        // rather than flickering between two.
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            facing = dx > 0 ? Facing.RIGHT : Facing.LEFT;
+        } else {
+            facing = dy > 0 ? Facing.UP : Facing.DOWN;
+        }
+        updateRegionForFacing();
+
         float length = (float) Math.sqrt(dx * dx + dy * dy);
         dx /= length;
         dy /= length;
@@ -59,6 +77,19 @@ public class Player extends Entity {
         if (checker == null || !checker.isBlocked(position.x, position.y + stepY, size.x, size.y)) {
             position.y += stepY;
         }
+    }
+
+    private void updateRegionForFacing() {
+        switch (facing) {
+            case UP:    region = regionBack;  break;
+            case DOWN:  region = regionFront; break;
+            case LEFT:  region = regionLeft;  break;
+            case RIGHT: region = regionRight; break;
+        }
+    }
+
+    public Facing getFacing() {
+        return facing;
     }
 
     public float getBatteryLevel() {

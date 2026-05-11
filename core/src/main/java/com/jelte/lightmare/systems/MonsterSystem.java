@@ -37,6 +37,6 @@ public class MonsterSystem {
         float x = player.getPosition().x + MathUtils.cos(angle) * distance;
         float y = player.getPosition().y + MathUtils.sin(angle) * distance;
 
-        entityManager.addEntity(new Monster(x, y, Resources.monsterTexture));
+        entityManager.addEntity(new Monster(x, y, Resources.skullguyRegion));
     }
 }
