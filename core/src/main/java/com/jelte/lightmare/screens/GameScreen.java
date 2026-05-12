@@ -40,6 +40,8 @@ import com.jelte.lightmare.systems.MonsterSystem;
 import com.jelte.lightmare.systems.MusicSystem;
 import com.jelte.lightmare.systems.ParticleSystem;
 import com.jelte.lightmare.systems.ResourceSystem;
+import com.jelte.lightmare.systems.UpgradeSystem;
+import com.jelte.lightmare.systems.UpgradeSystem.Upgrade;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -60,7 +62,16 @@ public class GameScreen implements Screen {
     private ResourceSystem resourceSystem;
     private ParticleSystem particleSystem;
     private MusicSystem musicSystem;
+    private UpgradeSystem upgradeSystem;
     private PlayerController playerController;
+
+    // Upgrade machine + panel state. Machine position is set once the house
+    // is built (see constructor) and lives in world space so the same AABB
+    // can be used for both rendering and click detection.
+    private static final float MACHINE_W = 32f;
+    private static final float MACHINE_H = 32f;
+    private float machineX, machineY;
+    private boolean upgradePanelOpen = false;
 
     // Juice
     private static final float SHAKE_DURATION = 0.2f;
@@ -193,6 +204,15 @@ public class GameScreen implements Screen {
 
         particleSystem = new ParticleSystem();
         musicSystem = new MusicSystem();
+        upgradeSystem = new UpgradeSystem();
+        // Resource.globalClicksRequired is static and would otherwise persist
+        // across a game-over restart, leaving rocks easier than intended.
+        Resource.setGlobalClicksRequired(3);
+
+        // Upgrade machine sits along the left wall, vertically centered, so
+        // the back-wall chests and the south-wall door stay clear.
+        machineX = house.getPosition().x + 24f;
+        machineY = house.getPosition().y + (House.HEIGHT - MACHINE_H) * 0.5f;
         // Music start is deferred to render() — browsers (and HTML5/GWT in
         // particular) block audio playback until the user has interacted with
         // the page, so calling play() from the constructor throws NotAllowedError.
@@ -229,9 +249,16 @@ public class GameScreen implements Screen {
 
         tryStartMusic();
 
-        // Update logic
-        float dx = playerController.getHorizontalInput();
-        float dy = playerController.getVerticalInput();
+        // Closing the panel via ESC is checked before reading any other input
+        // so the close-then-rerelease can happen on the same frame.
+        if (upgradePanelOpen && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            upgradePanelOpen = false;
+        }
+
+        // Update logic — freeze player input while the upgrade panel is open
+        // so the player can't walk away mid-purchase.
+        float dx = upgradePanelOpen ? 0f : playerController.getHorizontalInput();
+        float dy = upgradePanelOpen ? 0f : playerController.getVerticalInput();
         player.move(dx, dy, delta, this::isBlockedByRocks);
 
         entityManager.update(delta);
@@ -253,8 +280,13 @@ public class GameScreen implements Screen {
         // Test player against house bounds (use sprite center) for the inside-view toggle.
         playerInside = house.containsPoint(player.getPosition().x + 8, player.getPosition().y + 8);
 
-        // Click to Mine
-        handleMining();
+        // Panel only makes sense inside the house — close if the player leaves.
+        if (upgradePanelOpen && !playerInside) {
+            upgradePanelOpen = false;
+        }
+
+        // Click to Mine / open upgrade panel / interact with panel
+        handleClicks();
 
         // Smooth Camera Follow (LERP) — keep float precision in cameraTargetX/Y
         // and snap to integer pixels at render time to avoid sub-pixel jitter on
@@ -379,40 +411,233 @@ public class GameScreen implements Screen {
 
         // UI: Battery bar (Wordless) - Rendered in screen space
         renderUI();
+
+        if (upgradePanelOpen) {
+            renderUpgradePanel();
+        }
     }
 
-    private void handleMining() {
-        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
-            // viewport.unproject uses the letterboxed GL viewport (not the full
-            // canvas), so clicks map correctly even when the window aspect
-            // doesn't match 16:9. camera.unproject(Vector3) would be wrong then.
-            Vector3 worldCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            viewport.unproject(worldCoords);
-            for (Entity e : entityManager.getEntities()) {
-                if (e instanceof Resource && !((Resource) e).isMined()) {
-                    if (worldCoords.x >= e.getPosition().x && worldCoords.x <= e.getPosition().x + e.getSize().x &&
-                        worldCoords.y >= e.getPosition().y && worldCoords.y <= e.getPosition().y + e.getSize().y) {
+    private void handleClicks() {
+        if (!Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) return;
 
-                        // Check if player is near
-                        if (player.getPosition().dst(e.getPosition()) < 50) {
-                            Resource r = (Resource) e;
-                            boolean finished = r.click();
-                            Resources.mineSound.play();
-                            // Per-click particle burst; shake on the finishing click.
-                            particleSystem.burst(
-                                r.getPosition().x + r.getSize().x / 2f,
-                                r.getPosition().y + r.getSize().y / 2f,
-                                MathUtils.random(4, 5));
-                            if (finished) {
-                                Entity followTarget = trail.isEmpty() ? player : trail.get(trail.size() - 1);
-                                r.setMined(true, followTarget);
-                                trail.add(r);
-                                triggerShake(2.5f);
-                            }
+        // Panel takes click priority — any click goes to panel slots or closes
+        // it. Use the fixed-UI coord space so the panel lives in screen pixels.
+        if (upgradePanelOpen) {
+            float uiX = toUiX(Gdx.input.getX());
+            float uiY = toUiY(Gdx.input.getY());
+            handleUpgradePanelClick(uiX, uiY);
+            return;
+        }
+
+        // viewport.unproject uses the letterboxed GL viewport (not the full
+        // canvas), so clicks map correctly even when the window aspect
+        // doesn't match 16:9. camera.unproject(Vector3) would be wrong then.
+        Vector3 worldCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+        viewport.unproject(worldCoords);
+
+        // Click on the upgrade machine (only relevant when inside the house —
+        // outside, the machine sprite isn't drawn).
+        if (playerInside
+            && worldCoords.x >= machineX && worldCoords.x <= machineX + MACHINE_W
+            && worldCoords.y >= machineY && worldCoords.y <= machineY + MACHINE_H) {
+            upgradePanelOpen = true;
+            return;
+        }
+
+        for (Entity e : entityManager.getEntities()) {
+            if (e instanceof Resource && !((Resource) e).isMined()) {
+                if (worldCoords.x >= e.getPosition().x && worldCoords.x <= e.getPosition().x + e.getSize().x &&
+                    worldCoords.y >= e.getPosition().y && worldCoords.y <= e.getPosition().y + e.getSize().y) {
+
+                    // Check if player is near
+                    if (player.getPosition().dst(e.getPosition()) < 50) {
+                        Resource r = (Resource) e;
+                        boolean finished = r.click();
+                        Resources.mineSound.play();
+                        // Per-click particle burst; shake on the finishing click.
+                        particleSystem.burst(
+                            r.getPosition().x + r.getSize().x / 2f,
+                            r.getPosition().y + r.getSize().y / 2f,
+                            MathUtils.random(4, 5));
+                        if (finished) {
+                            Entity followTarget = trail.isEmpty() ? player : trail.get(trail.size() - 1);
+                            r.setMined(true, followTarget);
+                            trail.add(r);
+                            triggerShake(2.5f);
                         }
                     }
                 }
             }
+        }
+    }
+
+    // --- Upgrade panel layout, drawn in a fixed 640x360 UI space. ---
+    private static final float UI_W = 640f;
+    private static final float UI_H = 360f;
+    private static final float PANEL_W = 420f;
+    private static final float PANEL_H = 240f;
+    private static final float SLOT_W = 80f;
+    private static final float SLOT_H = 180f;
+    private static final float CLOSE_SIZE = 18f;
+
+    private float panelX() { return (UI_W - PANEL_W) * 0.5f; }
+    private float panelY() { return (UI_H - PANEL_H) * 0.5f; }
+
+    private float slotX(int i) {
+        float gap = (PANEL_W - 4f * SLOT_W) / 5f;
+        return panelX() + gap + i * (SLOT_W + gap);
+    }
+    private float slotY() { return panelY() + 30f; }
+
+    private float closeBtnX() { return panelX() + PANEL_W - CLOSE_SIZE - 8f; }
+    private float closeBtnY() { return panelY() + PANEL_H - CLOSE_SIZE - 8f; }
+
+    /** Convert a raw screen pixel to fixed UI X in [0, UI_W]. */
+    private float toUiX(int screenX) {
+        return ((float)(screenX - viewport.getLeftGutterWidth()) / viewport.getScreenWidth()) * UI_W;
+    }
+    /** Convert a raw screen pixel to fixed UI Y in [0, UI_H] (Y up). */
+    private float toUiY(int screenY) {
+        return (1f - (float)(screenY - viewport.getTopGutterHeight()) / viewport.getScreenHeight()) * UI_H;
+    }
+
+    private void handleUpgradePanelClick(float ux, float uy) {
+        // Close button
+        if (ux >= closeBtnX() && ux <= closeBtnX() + CLOSE_SIZE
+            && uy >= closeBtnY() && uy <= closeBtnY() + CLOSE_SIZE) {
+            upgradePanelOpen = false;
+            return;
+        }
+        // Upgrade slots
+        for (int i = 0; i < Upgrade.values().length; i++) {
+            float sx = slotX(i), sy = slotY();
+            if (ux >= sx && ux <= sx + SLOT_W && uy >= sy && uy <= sy + SLOT_H) {
+                Upgrade u = Upgrade.values()[i];
+                if (upgradeSystem.canAfford(u, storageCounts)) {
+                    upgradeSystem.purchase(u, storageCounts, player);
+                    Resources.powerUpSound.play();
+                }
+                return;
+            }
+        }
+        // Click outside the panel body closes it.
+        float pxL = panelX(), pxR = panelX() + PANEL_W;
+        float pyB = panelY(), pyT = panelY() + PANEL_H;
+        if (ux < pxL || ux > pxR || uy < pyB || uy > pyT) {
+            upgradePanelOpen = false;
+        }
+    }
+
+    private void renderUpgradePanel() {
+        // Switch to fixed 640x360 UI projection so the panel is stationary on
+        // screen no matter where the world camera happens to be looking.
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, UI_W, UI_H);
+        batch.begin();
+
+        // Darken the world behind the panel.
+        batch.setColor(0f, 0f, 0f, 0.55f);
+        batch.draw(Resources.pixelTexture, 0, 0, UI_W, UI_H);
+
+        // Panel background + border.
+        batch.setColor(0.10f, 0.08f, 0.05f, 1f);
+        batch.draw(Resources.pixelTexture, panelX(), panelY(), PANEL_W, PANEL_H);
+        batch.setColor(0.55f, 0.40f, 0.20f, 1f);
+        drawRectOutline(panelX(), panelY(), PANEL_W, PANEL_H, 2f);
+
+        for (int i = 0; i < Upgrade.values().length; i++) {
+            renderUpgradeSlot(Upgrade.values()[i], slotX(i), slotY());
+        }
+
+        // Close button: an "X" universally read as "close" without text.
+        batch.setColor(0.6f, 0.6f, 0.6f, 1f);
+        drawX(closeBtnX(), closeBtnY(), CLOSE_SIZE);
+
+        batch.end();
+
+        // Restore for any subsequent draws (renderUI does its own anyway).
+        batch.setColor(Color.WHITE);
+    }
+
+    private void renderUpgradeSlot(Upgrade u, float sx, float sy) {
+        boolean affordable = upgradeSystem.canAfford(u, storageCounts);
+        boolean maxed = upgradeSystem.isMaxed(u);
+        int level = upgradeSystem.getLevel(u);
+
+        // Slot background tinted faintly with the ore color so the slot's
+        // payment ore is signalled before you even look at the cost row.
+        Color tint = STORAGE_COLORS[u.oreVariant];
+        batch.setColor(tint.r * 0.4f, tint.g * 0.4f, tint.b * 0.4f, 1f);
+        batch.draw(Resources.pixelTexture, sx, sy, SLOT_W, SLOT_H);
+        batch.setColor(tint);
+        drawRectOutline(sx, sy, SLOT_W, SLOT_H, 1f);
+
+        // Level pips along the top: filled circles for purchased levels,
+        // hollow for the remaining.
+        float pipR = 4f;
+        float pipGap = 4f;
+        float pipsTotalW = UpgradeSystem.MAX_LEVEL * (pipR * 2f) + (UpgradeSystem.MAX_LEVEL - 1) * pipGap;
+        float pipStartX = sx + (SLOT_W - pipsTotalW) * 0.5f + pipR;
+        float pipY = sy + SLOT_H - 12f;
+        for (int p = 0; p < UpgradeSystem.MAX_LEVEL; p++) {
+            float px = pipStartX + p * (pipR * 2f + pipGap);
+            // Hollow ring drawn with a small black inset for a "filled" pip,
+            // or a tinted ring for "empty".
+            batch.setColor(p < level ? Color.WHITE : new Color(0.3f, 0.3f, 0.3f, 1f));
+            batch.draw(Resources.pixelTexture, px - pipR, pipY - pipR, pipR * 2f, pipR * 2f);
+        }
+
+        // Stat icon — programmatically drawn so it's pure visual, no text.
+        Texture icon = iconFor(u);
+        float iconSize = 36f;
+        float ix = sx + (SLOT_W - iconSize) * 0.5f;
+        float iy = sy + SLOT_H * 0.5f - iconSize * 0.5f + 6f;
+        batch.setColor(affordable || maxed ? Color.WHITE : new Color(1f, 1f, 1f, 0.35f));
+        batch.draw(icon, ix, iy, iconSize, iconSize);
+
+        // Cost row: a stack of mini ore sprites showing what each level costs.
+        // Hidden once the upgrade hits its cap — no point displaying a cost
+        // the player can't pay any further.
+        if (!maxed) {
+            float oreSize = 12f;
+            float oreGap = 2f;
+            float costTotalW = UpgradeSystem.COST_PER_LEVEL * oreSize
+                + (UpgradeSystem.COST_PER_LEVEL - 1) * oreGap;
+            float costStartX = sx + (SLOT_W - costTotalW) * 0.5f;
+            float costY = sy + 10f;
+            batch.setColor(affordable ? Color.WHITE : new Color(1f, 1f, 1f, 0.4f));
+            for (int c = 0; c < UpgradeSystem.COST_PER_LEVEL; c++) {
+                batch.draw(Resources.oreRegions[u.oreVariant],
+                    costStartX + c * (oreSize + oreGap), costY, oreSize, oreSize);
+            }
+        }
+        batch.setColor(Color.WHITE);
+    }
+
+    private Texture iconFor(Upgrade u) {
+        switch (u) {
+            case BATTERY: return Resources.iconBattery;
+            case SPEED:   return Resources.iconSpeed;
+            case MINING:  return Resources.iconMining;
+            case LIGHT:   return Resources.iconLight;
+        }
+        return Resources.iconBattery;
+    }
+
+    private void drawRectOutline(float x, float y, float w, float h, float thickness) {
+        batch.draw(Resources.pixelTexture, x, y, w, thickness);
+        batch.draw(Resources.pixelTexture, x, y + h - thickness, w, thickness);
+        batch.draw(Resources.pixelTexture, x, y, thickness, h);
+        batch.draw(Resources.pixelTexture, x + w - thickness, y, thickness, h);
+    }
+
+    private void drawX(float x, float y, float size) {
+        // Two diagonal bars approximated with stacks of thin rectangles —
+        // pixelTexture has no rotation API per draw, so we fake it cheaply.
+        int steps = (int) size;
+        for (int i = 0; i < steps; i++) {
+            float t = i / (float) steps;
+            batch.draw(Resources.pixelTexture, x + t * size, y + t * size, 2f, 2f);
+            batch.draw(Resources.pixelTexture, x + t * size, y + (1f - t) * size, 2f, 2f);
         }
     }
 
@@ -539,6 +764,11 @@ public class GameScreen implements Screen {
                 chestX + (chestW - textWidth) * 0.5f,
                 chestY + chestH + 10f);
         }
+
+        // Upgrade machine — purely visual here; click detection lives in
+        // handleClicks() using the same machineX/machineY world coords.
+        batch.setColor(Color.WHITE);
+        batch.draw(Resources.upgradeMachineRegion, machineX, machineY, MACHINE_W, MACHINE_H);
 
         batch.setColor(Color.WHITE);
         player.render(batch);

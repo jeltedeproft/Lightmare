@@ -26,6 +26,13 @@ public class Resources {
     public static TextureRegion playerLeft;
     public static TextureRegion playerRight;
     public static TextureRegion skullguyRegion;
+    public static TextureRegion upgradeMachineRegion;
+
+    // Programmatic stat icons for the upgrade panel.
+    public static Texture iconBattery;
+    public static Texture iconSpeed;
+    public static Texture iconMining;
+    public static Texture iconLight;
     /** rock_blue, rock_green, rock_orange, rock_purple — pick a random index per spawn. */
     public static TextureRegion[] oreRegions;
     public static String[] oreNames = {"rock_blue", "rock_green", "rock_orange", "rock_purple"};
@@ -56,6 +63,12 @@ public class Resources {
         playerLeft = atlas.findRegion("lilguyLeft");
         playerRight = atlas.findRegion("lilguyRight");
         skullguyRegion = atlas.findRegion("skullguy");
+        upgradeMachineRegion = atlas.findRegion("upgrademachine");
+
+        iconBattery = createBatteryIcon(32, 32);
+        iconSpeed = createSpeedIcon(32, 32);
+        iconMining = createMiningIcon(32, 32);
+        iconLight = createLightIcon(32, 32);
         oreRegions = new TextureRegion[oreNames.length];
         for (int i = 0; i < oreNames.length; i++) {
             oreRegions[i] = atlas.findRegion(oreNames[i]);
@@ -91,6 +104,90 @@ public class Resources {
             }
         }
         return tracks.toArray(new Music[0]);
+    }
+
+    private static Texture createBatteryIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        p.setColor(Color.WHITE);
+        int bw = 22, bh = 14;
+        int bx = (w - bw - 4) / 2;
+        int by = (h - bh) / 2;
+        // Battery body outline (drawn 2x for a 2px-thick frame).
+        p.drawRectangle(bx, by, bw, bh);
+        p.drawRectangle(bx + 1, by + 1, bw - 2, bh - 2);
+        // Positive tip nub.
+        p.fillRectangle(bx + bw, by + 4, 3, bh - 8);
+        // Three filled cells inside.
+        p.fillRectangle(bx + 3, by + 3, 5, bh - 6);
+        p.fillRectangle(bx + 9, by + 3, 5, bh - 6);
+        p.fillRectangle(bx + 15, by + 3, 4, bh - 6);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createSpeedIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        p.setColor(Color.WHITE);
+        int cy = h / 2;
+        int cx = w / 2 - 4;
+        // Three right-pointing chevrons spaced horizontally.
+        for (int i = -1; i <= 1; i++) {
+            int ox = i * 7;
+            p.fillTriangle(cx + ox - 4, cy - 9, cx + ox - 4, cy + 9, cx + ox + 4, cy);
+            p.setColor(0, 0, 0, 0);
+            p.fillTriangle(cx + ox - 6, cy - 5, cx + ox - 6, cy + 5, cx + ox + 0, cy);
+            p.setColor(Color.WHITE);
+        }
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createMiningIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        p.setColor(Color.WHITE);
+        // Pickaxe head — a horizontal bar at the top, tapering on the ends.
+        int headY = 6;
+        p.fillTriangle(2, headY + 5, 14, headY + 5, 2, headY - 1);
+        p.fillTriangle(w - 2, headY + 5, w - 14, headY + 5, w - 2, headY - 1);
+        p.fillRectangle(4, headY, w - 8, 4);
+        // Handle running from head center to bottom-right.
+        for (int i = -1; i <= 1; i++) {
+            p.drawLine(w / 2 + i, headY + 4, w - 6 + i, h - 4);
+        }
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createLightIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        p.setColor(Color.WHITE);
+        int cx = w / 2, cy = h / 2;
+        // Sun body + 8 surrounding rays.
+        p.fillCircle(cx, cy, 6);
+        for (int i = 0; i < 8; i++) {
+            double ang = i * Math.PI / 4;
+            int x1 = (int) Math.round(cx + Math.cos(ang) * 10);
+            int y1 = (int) Math.round(cy + Math.sin(ang) * 10);
+            int x2 = (int) Math.round(cx + Math.cos(ang) * 14);
+            int y2 = (int) Math.round(cy + Math.sin(ang) * 14);
+            p.drawLine(x1, y1, x2, y2);
+            p.drawLine(x1 + 1, y1, x2 + 1, y2);
+            p.drawLine(x1, y1 + 1, x2, y2 + 1);
+        }
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        p.dispose();
+        return t;
     }
 
     private static Texture createColoredTexture(int width, int height, Color color) {
@@ -157,5 +254,9 @@ public class Resources {
                 if (m != null) m.dispose();
             }
         }
+        if (iconBattery != null) iconBattery.dispose();
+        if (iconSpeed != null) iconSpeed.dispose();
+        if (iconMining != null) iconMining.dispose();
+        if (iconLight != null) iconLight.dispose();
     }
 }

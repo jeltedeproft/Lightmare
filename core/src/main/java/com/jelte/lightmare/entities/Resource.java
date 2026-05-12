@@ -5,8 +5,13 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Vector2;
 
 public class Resource extends Entity {
+    private static int globalClicksRequired = 3;
+    public static void setGlobalClicksRequired(int v) {
+        globalClicksRequired = Math.max(1, v);
+    }
+    public static int getGlobalClicksRequired() { return globalClicksRequired; }
+
     private boolean mined = false;
-    private int clicksRequired = 3;
     private int currentClicks = 0;
     private Entity followTarget;
     private float followSpeed = 150f;
@@ -45,11 +50,12 @@ public class Resource extends Entity {
     public boolean click() {
         if (mined) return false;
         currentClicks++;
+        int required = globalClicksRequired;
         // Visual feedback: shrink slightly per click
-        float scale = 1.0f - ((float)currentClicks / (clicksRequired + 1)) * 0.5f;
+        float scale = 1.0f - ((float)currentClicks / (required + 1)) * 0.5f;
         size.set(16 * scale, 16 * scale);
-        
-        if (currentClicks >= clicksRequired) {
+
+        if (currentClicks >= required) {
             return true;
         }
         return false;

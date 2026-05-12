@@ -12,7 +12,7 @@ public class Player extends Entity {
     public enum Facing { UP, DOWN, LEFT, RIGHT }
 
     private float batteryLevel = 100f;
-    private final float maxBattery = 100f;
+    private float maxBattery = 100f;
     private float lightRadius = 120f;
     private float speed = 100f;
     private float hp = 100f;
@@ -131,5 +131,17 @@ public class Player extends Entity {
 
     public float getEmergencyLightRadius() {
         return 20f;
+    }
+
+    public float getSpeed() { return speed; }
+    public void setSpeed(float s) { this.speed = s; }
+
+    public float getMaxLightRadius() { return lightRadius; }
+    public void setMaxLightRadius(float r) { this.lightRadius = r; }
+
+    public void setMaxBattery(float m) {
+        this.maxBattery = m;
+        // Top up on upgrade so it feels like a reward, not a percentage-shrink.
+        this.batteryLevel = m;
     }
 }
