@@ -42,16 +42,34 @@ public class Monster extends Entity {
 
             // Flee from player/light
             Vector2 fleeDir = position.cpy().sub(player.getPosition()).nor();
-            position.add(fleeDir.scl(speed * 2 * delta));
+            moveBlockedByHouse(fleeDir.x * speed * 2f * delta,
+                               fleeDir.y * speed * 2f * delta, house);
         } else {
             // Move towards player
             Vector2 moveDir = player.getPosition().cpy().sub(position).nor();
-            position.add(moveDir.scl(speed * delta));
-            
+            moveBlockedByHouse(moveDir.x * speed * delta,
+                               moveDir.y * speed * delta, house);
+
             // Attack if close
             if (distToPlayer < 12) {
                 player.takeDamage(damagePerSecond * delta);
             }
+        }
+    }
+
+    /**
+     * Axis-separated step that respects the house perimeter (no door access for
+     * monsters). Sliding on one axis while the other is blocked means monsters
+     * pile up against the wall instead of getting frozen by it.
+     */
+    private void moveBlockedByHouse(float dx, float dy, House house) {
+        float newX = position.x + dx;
+        if (!house.isBlockedByWall(newX, position.y, size.x, size.y, false)) {
+            position.x = newX;
+        }
+        float newY = position.y + dy;
+        if (!house.isBlockedByWall(position.x, newY, size.x, size.y, false)) {
+            position.y = newY;
         }
     }
 }

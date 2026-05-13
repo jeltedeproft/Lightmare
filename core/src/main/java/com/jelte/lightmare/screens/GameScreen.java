@@ -303,7 +303,10 @@ public class GameScreen implements Screen {
         float dy = playerInputAllowed ? playerController.getVerticalInput() : 0f;
 
         if (!updatesFrozen) {
-            player.move(dx, dy, delta, this::isBlockedByRocks);
+            // Player checks rocks + house walls (with the door gap open).
+            player.move(dx, dy, delta, (x, y, w, h) ->
+                isBlockedByRocks(x, y, w, h)
+                    || house.isBlockedByWall(x, y, w, h, true));
 
             entityManager.update(delta);
             monsterSystem.update(delta, player);
@@ -312,7 +315,7 @@ public class GameScreen implements Screen {
             // Boss has phase-dependent AI (chase shell, flee cute) — only active
             // once the intro pan has handed control back to the player.
             if (boss != null && state == State.PLAYING) {
-                boss.updateAI(player, delta);
+                boss.updateAI(player, house, delta);
             }
 
             // Monster contact deals continuous tick damage. Any HP drop this frame
@@ -446,6 +449,15 @@ public class GameScreen implements Screen {
             renderInsideView();
         } else {
             entityManager.render(batch);
+            // Outside door indicator — a darker plank in the south wall so the
+            // entrance is visually findable from outside.
+            float doorY = house.getPosition().y;
+            float doorX = house.getDoorX();
+            batch.setColor(0.40f, 0.25f, 0.12f, 1f);
+            batch.draw(Resources.pixelTexture, doorX, doorY, House.DOOR_WIDTH, 6f);
+            batch.setColor(0.55f, 0.35f, 0.18f, 1f);
+            batch.draw(Resources.pixelTexture, doorX, doorY + 6f, House.DOOR_WIDTH, 2f);
+            batch.setColor(Color.WHITE);
         }
         particleSystem.render(batch);
         renderHomeIndicator(delta);

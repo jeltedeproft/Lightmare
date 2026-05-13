@@ -48,8 +48,9 @@ public class Boss extends Entity {
      * Phase-dependent movement. Shell phase chases the player and applies
      * contact damage on close range — the fight needs the player moving.
      * Cute phase flees, so the player has to chase a tiny target down.
+     * The house perimeter is solid for the boss (no door access).
      */
-    public void updateAI(Player player, float delta) {
+    public void updateAI(Player player, House house, float delta) {
         if (isDead()) return;
         Vector2 toPlayer = new Vector2(
             player.getPosition().x - position.x,
@@ -58,14 +59,25 @@ public class Boss extends Entity {
         if (dist > 0.001f) toPlayer.scl(1f / dist);
 
         if (!shellBroken) {
-            position.x += toPlayer.x * SHELL_CHASE_SPEED * delta;
-            position.y += toPlayer.y * SHELL_CHASE_SPEED * delta;
+            moveBlockedByHouse(toPlayer.x * SHELL_CHASE_SPEED * delta,
+                               toPlayer.y * SHELL_CHASE_SPEED * delta, house);
             if (dist < CONTACT_RANGE) {
                 player.takeDamage(CONTACT_DPS * delta);
             }
         } else {
-            position.x -= toPlayer.x * CUTE_FLEE_SPEED * delta;
-            position.y -= toPlayer.y * CUTE_FLEE_SPEED * delta;
+            moveBlockedByHouse(-toPlayer.x * CUTE_FLEE_SPEED * delta,
+                               -toPlayer.y * CUTE_FLEE_SPEED * delta, house);
+        }
+    }
+
+    private void moveBlockedByHouse(float dx, float dy, House house) {
+        float newX = position.x + dx;
+        if (!house.isBlockedByWall(newX, position.y, size.x, size.y, false)) {
+            position.x = newX;
+        }
+        float newY = position.y + dy;
+        if (!house.isBlockedByWall(position.x, newY, size.x, size.y, false)) {
+            position.y = newY;
         }
     }
 
