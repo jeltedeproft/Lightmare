@@ -33,6 +33,10 @@ public class Resources {
     public static Texture iconSpeed;
     public static Texture iconMining;
     public static Texture iconLight;
+
+    // Boss placeholders — programmatic until real art lands.
+    public static Texture bossShellTexture;
+    public static Texture bossCuteTexture;
     /** rock_blue, rock_green, rock_orange, rock_purple — pick a random index per spawn. */
     public static TextureRegion[] oreRegions;
     public static String[] oreNames = {"rock_blue", "rock_green", "rock_orange", "rock_purple"};
@@ -69,6 +73,9 @@ public class Resources {
         iconSpeed = createSpeedIcon(32, 32);
         iconMining = createMiningIcon(32, 32);
         iconLight = createLightIcon(32, 32);
+
+        bossShellTexture = createBossShellPlaceholder(64, 64);
+        bossCuteTexture = createBossCutePlaceholder(32, 32);
         oreRegions = new TextureRegion[oreNames.length];
         for (int i = 0; i < oreNames.length; i++) {
             oreRegions[i] = atlas.findRegion(oreNames[i]);
@@ -190,6 +197,62 @@ public class Resources {
         return t;
     }
 
+    private static Texture createBossShellPlaceholder(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        // Spiky dark-red blob silhouette.
+        p.setColor(0.35f, 0.04f, 0.04f, 1f);
+        p.fillCircle(w / 2, h / 2, w / 2 - 4);
+        p.setColor(0.55f, 0.05f, 0.05f, 1f);
+        for (int i = 0; i < 8; i++) {
+            double a = i * Math.PI / 4;
+            int sx = (int) Math.round(w / 2 + Math.cos(a) * (w / 2 - 2));
+            int sy = (int) Math.round(h / 2 + Math.sin(a) * (h / 2 - 2));
+            p.fillCircle(sx, sy, 4);
+        }
+        // Angry yellow eyes with black pupils.
+        p.setColor(1f, 0.85f, 0f, 1f);
+        p.fillCircle(w / 2 - 12, h / 2 - 6, 6);
+        p.fillCircle(w / 2 + 12, h / 2 - 6, 6);
+        p.setColor(0, 0, 0, 1f);
+        p.fillCircle(w / 2 - 12, h / 2 - 6, 3);
+        p.fillCircle(w / 2 + 12, h / 2 - 6, 3);
+        // Mean downward chevron mouth.
+        p.setColor(0.1f, 0, 0, 1f);
+        p.fillTriangle(w / 2 - 10, h / 2 + 8, w / 2 + 10, h / 2 + 8, w / 2, h / 2 + 18);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createBossCutePlaceholder(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        // Round pink body.
+        p.setColor(1f, 0.72f, 0.85f, 1f);
+        p.fillCircle(w / 2, h / 2, w / 2 - 2);
+        // Big dark eyes.
+        p.setColor(0.08f, 0.08f, 0.08f, 1f);
+        p.fillCircle(w / 2 - 6, h / 2 - 2, 3);
+        p.fillCircle(w / 2 + 6, h / 2 - 2, 3);
+        // Eye highlights.
+        p.setColor(1f, 1f, 1f, 1f);
+        p.fillCircle(w / 2 - 5, h / 2 - 3, 1);
+        p.fillCircle(w / 2 + 7, h / 2 - 3, 1);
+        // Cheek blush.
+        p.setColor(1f, 0.5f, 0.65f, 1f);
+        p.fillCircle(w / 2 - 10, h / 2 + 3, 2);
+        p.fillCircle(w / 2 + 10, h / 2 + 3, 2);
+        // Smile.
+        p.setColor(0.5f, 0.2f, 0.3f, 1f);
+        p.drawLine(w / 2 - 3, h / 2 + 5, w / 2 + 3, h / 2 + 5);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
+    }
+
     private static Texture createColoredTexture(int width, int height, Color color) {
         Pixmap pixmap = new Pixmap(width, height, Pixmap.Format.RGBA8888);
         pixmap.setColor(color);
@@ -258,5 +321,7 @@ public class Resources {
         if (iconSpeed != null) iconSpeed.dispose();
         if (iconMining != null) iconMining.dispose();
         if (iconLight != null) iconLight.dispose();
+        if (bossShellTexture != null) bossShellTexture.dispose();
+        if (bossCuteTexture != null) bossCuteTexture.dispose();
     }
 }

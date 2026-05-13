@@ -29,6 +29,7 @@ import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.jelte.lightmare.Resources;
 import com.jelte.lightmare.Shaders;
+import com.jelte.lightmare.entities.Boss;
 import com.jelte.lightmare.entities.Entity;
 import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
@@ -46,8 +47,25 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class GameScreen implements Screen {
-    private enum State { PLAYING, GAMEOVER }
+    /**
+     * Game flow:
+     *   PLAYING ─[deposit threshold reached]─▶ BOSS_INTRO (~1.8s cinematic pan)
+     *   BOSS_INTRO ─▶ PLAYING (boss is now an active entity)
+     *   PLAYING ─[boss killed]─▶ WITHER (~3.5s red overlay ramps up)
+     *   WITHER ─▶ END (silent end screen with restart)
+     *   PLAYING ─[HP=0]─▶ GAMEOVER
+     */
+    private enum State { PLAYING, BOSS_INTRO, WITHER, END, GAMEOVER }
     private State state = State.PLAYING;
+
+    // Boss arc
+    private static final int BOSS_DEPOSIT_THRESHOLD = 25;
+    private static final float BOSS_INTRO_DURATION = 1.8f;
+    private static final float WITHER_DURATION = 3.5f;
+    private Boss boss;
+    private float bossIntroTimer = 0f;
+    private float witherTimer = 0f;
+    private int totalDeposits = 0;
 
     private static final int VIRTUAL_WIDTH = 640;
     private static final int VIRTUAL_HEIGHT = 360;
@@ -246,6 +264,10 @@ public class GameScreen implements Screen {
             renderGameOver();
             return;
         }
+        if (state == State.END) {
+            renderEndScreen();
+            return;
+        }
 
         tryStartMusic();
 
@@ -255,26 +277,34 @@ public class GameScreen implements Screen {
             upgradePanelOpen = false;
         }
 
-        // Update logic — freeze player input while the upgrade panel is open
-        // so the player can't walk away mid-purchase.
-        float dx = upgradePanelOpen ? 0f : playerController.getHorizontalInput();
-        float dy = upgradePanelOpen ? 0f : playerController.getVerticalInput();
-        player.move(dx, dy, delta, this::isBlockedByRocks);
+        // WITHER is a frozen cinematic — everything pauses while the world dies.
+        // BOSS_INTRO keeps the world ticking but locks player input so the
+        // camera pan reads as "the game is showing you something".
+        boolean updatesFrozen = state == State.WITHER;
+        boolean playerInputAllowed = state == State.PLAYING && !upgradePanelOpen;
 
-        entityManager.update(delta);
-        monsterSystem.update(delta, player);
-        resourceSystem.update(delta, player);
-        particleSystem.update(delta);
+        // Update logic
+        float dx = playerInputAllowed ? playerController.getHorizontalInput() : 0f;
+        float dy = playerInputAllowed ? playerController.getVerticalInput() : 0f;
 
-        // Monster contact deals continuous tick damage. Any HP drop this frame
-        // refreshes the screen-shake — when contact breaks, shake decays out.
-        if (player.getHp() < prevHp) {
-            triggerShake(1.0f);
-        }
-        prevHp = player.getHp();
+        if (!updatesFrozen) {
+            player.move(dx, dy, delta, this::isBlockedByRocks);
 
-        if (player.getHp() <= 0) {
-            state = State.GAMEOVER;
+            entityManager.update(delta);
+            monsterSystem.update(delta, player);
+            resourceSystem.update(delta, player);
+            particleSystem.update(delta);
+
+            // Monster contact deals continuous tick damage. Any HP drop this frame
+            // refreshes the screen-shake — when contact breaks, shake decays out.
+            if (player.getHp() < prevHp) {
+                triggerShake(1.0f);
+            }
+            prevHp = player.getHp();
+
+            if (player.getHp() <= 0) {
+                state = State.GAMEOVER;
+            }
         }
 
         // Test player against house bounds (use sprite center) for the inside-view toggle.
@@ -285,8 +315,21 @@ public class GameScreen implements Screen {
             upgradePanelOpen = false;
         }
 
-        // Click to Mine / open upgrade panel / interact with panel
-        handleClicks();
+        // Click to Mine / open upgrade panel / interact with panel / hit boss.
+        // Locked during cinematic states so the player can't, e.g., mine while
+        // the boss reveal is panning the camera.
+        if (state == State.PLAYING) {
+            handleClicks();
+        }
+
+        // State timers (after click handling so this-frame transitions render correctly)
+        if (state == State.BOSS_INTRO) {
+            bossIntroTimer -= delta;
+            if (bossIntroTimer <= 0f) state = State.PLAYING;
+        } else if (state == State.WITHER) {
+            witherTimer -= delta;
+            if (witherTimer <= 0f) state = State.END;
+        }
 
         // Smooth Camera Follow (LERP) — keep float precision in cameraTargetX/Y
         // and snap to integer pixels at render time to avoid sub-pixel jitter on
@@ -295,22 +338,30 @@ public class GameScreen implements Screen {
         // collapses in ~100ms instead of dragging out ~800ms — otherwise the
         // rounded render position keeps stepping by 1 FBO pixel per frame
         // during the tail and the light circles visibly shake.
-        boolean playerIdle = (dx == 0f && dy == 0f);
-        float lerp = playerIdle ? 20f : 5f;
-        float targetX = player.getPosition().x + 8;
-        float targetY = player.getPosition().y + 8;
-        float dxCam = targetX - cameraTargetX;
-        float dyCam = targetY - cameraTargetY;
-        if (dxCam * dxCam + dyCam * dyCam < 0.25f) {
-            cameraTargetX = targetX;
-            cameraTargetY = targetY;
-        } else {
-            cameraTargetX += dxCam * lerp * delta;
-            cameraTargetY += dyCam * lerp * delta;
+        if (state == State.BOSS_INTRO && boss != null) {
+            // Pan toward boss center during the reveal cinematic.
+            float bcx = boss.getPosition().x + boss.getSize().x * 0.5f;
+            float bcy = boss.getPosition().y + boss.getSize().y * 0.5f;
+            cameraTargetX += (bcx - cameraTargetX) * 2.5f * delta;
+            cameraTargetY += (bcy - cameraTargetY) * 2.5f * delta;
+        } else if (!updatesFrozen) {
+            boolean playerIdle = (dx == 0f && dy == 0f);
+            float lerp = playerIdle ? 20f : 5f;
+            float targetX = player.getPosition().x + 8;
+            float targetY = player.getPosition().y + 8;
+            float dxCam = targetX - cameraTargetX;
+            float dyCam = targetY - cameraTargetY;
+            if (dxCam * dxCam + dyCam * dyCam < 0.25f) {
+                cameraTargetX = targetX;
+                cameraTargetY = targetY;
+            } else {
+                cameraTargetX += dxCam * lerp * delta;
+                cameraTargetY += dyCam * lerp * delta;
+            }
         }
 
         // Update lights
-        flickerTimer += delta;
+        if (!updatesFrozen) flickerTimer += delta;
         float lightDist = player.getLightRadius();
         float battPct = player.getBatteryLevel() / player.getMaxBattery();
         if (battPct < 0.1f) {
@@ -328,8 +379,11 @@ public class GameScreen implements Screen {
         emergencyLight.setPosition(player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight.setDistance(player.getEmergencyLightRadius());
 
-        // Interaction logic
-        checkInteractions(delta);
+        // Interaction logic — skip during cinematic states so the player can't
+        // accidentally trigger another deposit/upgrade during the boss arc.
+        if (state == State.PLAYING) {
+            checkInteractions(delta);
+        }
 
         // Compute shake offset (decays linearly from intensity to 0 over SHAKE_DURATION).
         float shakeX = 0f, shakeY = 0f;
@@ -412,6 +466,13 @@ public class GameScreen implements Screen {
         // UI: Battery bar (Wordless) - Rendered in screen space
         renderUI();
 
+        if (state == State.WITHER) {
+            // Ramp from 0 → strong red as the timer counts down, so the world
+            // visibly bleeds out before the end card lands.
+            float t = 1f - Math.max(0f, witherTimer / WITHER_DURATION);
+            renderWitherOverlay(t);
+        }
+
         if (upgradePanelOpen) {
             renderUpgradePanel();
         }
@@ -444,6 +505,22 @@ public class GameScreen implements Screen {
             return;
         }
 
+        // Click on the boss — close-range attack like mining. After 5 hits the
+        // boss is dead and we kick off the WITHER cinematic.
+        if (boss != null && !boss.isDead()
+            && worldCoords.x >= boss.getPosition().x && worldCoords.x <= boss.getPosition().x + boss.getSize().x
+            && worldCoords.y >= boss.getPosition().y && worldCoords.y <= boss.getPosition().y + boss.getSize().y
+            && player.getPosition().dst(boss.getPosition()) < 80f) {
+            boolean killed = boss.takeHit();
+            Resources.mineSound.play();
+            triggerShake(killed ? 4f : 2f);
+            if (killed) {
+                state = State.WITHER;
+                witherTimer = WITHER_DURATION;
+            }
+            return;
+        }
+
         for (Entity e : entityManager.getEntities()) {
             if (e instanceof Resource && !((Resource) e).isMined()) {
                 if (worldCoords.x >= e.getPosition().x && worldCoords.x <= e.getPosition().x + e.getSize().x &&
@@ -467,6 +544,81 @@ public class GameScreen implements Screen {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private void spawnBoss() {
+        // East of the house, just out of the player's normal view, so the
+        // intro pan is a small geographic reveal rather than a teleport feel.
+        float bx = house.getPosition().x + House.WIDTH + 80f;
+        float by = house.getPosition().y + (House.HEIGHT - 64f) * 0.5f;
+        boss = new Boss(bx, by, Resources.bossShellTexture, Resources.bossCuteTexture);
+        entityManager.addEntity(boss);
+        state = State.BOSS_INTRO;
+        bossIntroTimer = BOSS_INTRO_DURATION;
+        // If the player triggered the spawn from inside the upgrade panel,
+        // close it so the cinematic isn't drawn on top of stale UI.
+        upgradePanelOpen = false;
+        triggerShake(3.5f);
+    }
+
+    private void renderWitherOverlay(float t) {
+        // Red film on top of the composited screen — pure full-screen quad in
+        // UI space so we don't fight the world camera.
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, UI_W, UI_H);
+        batch.begin();
+        batch.setColor(0.6f, 0.05f, 0.05f, 0.55f * t);
+        batch.draw(Resources.pixelTexture, 0, 0, UI_W, UI_H);
+        // Vignette by stacking a darker band near the edges.
+        batch.setColor(0f, 0f, 0f, 0.4f * t);
+        float band = 60f;
+        batch.draw(Resources.pixelTexture, 0, 0, UI_W, band);
+        batch.draw(Resources.pixelTexture, 0, UI_H - band, UI_W, band);
+        batch.draw(Resources.pixelTexture, 0, 0, band, UI_H);
+        batch.draw(Resources.pixelTexture, UI_W - band, 0, band, UI_H);
+        batch.setColor(Color.WHITE);
+        batch.end();
+    }
+
+    private void renderEndScreen() {
+        ScreenUtils.clear(0.04f, 0f, 0f, 1f);
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, UI_W, UI_H);
+        batch.begin();
+
+        // Cute creature corpse — drawn rotated 90° to read as "lying down".
+        // Once you have real art, swap this for a dedicated death sprite.
+        TextureRegion corpse = new TextureRegion(Resources.bossCuteTexture);
+        float corpseSize = 64f;
+        float corpseX = UI_W * 0.5f - 70f;
+        float corpseY = UI_H * 0.5f - 20f;
+        batch.setColor(0.55f, 0.35f, 0.45f, 1f); // desaturated, lifeless
+        batch.draw(corpse,
+            corpseX, corpseY, corpseSize * 0.5f, corpseSize * 0.5f,
+            corpseSize, corpseSize, 1f, 1f, 90f);
+
+        // Evil lil guy standing over the corpse — same sprite, blood-red tint.
+        batch.setColor(0.7f, 0.1f, 0.1f, 1f);
+        float pSize = 48f;
+        batch.draw(Resources.playerFront,
+            UI_W * 0.5f + 20f, UI_H * 0.5f - 16f, pSize, pSize);
+
+        // Restart button — reuse the existing restart icon so the affordance
+        // matches the game-over screen the player already saw (if any).
+        batch.setColor(Color.WHITE);
+        float btn = 48f;
+        float btnX = (UI_W - btn) * 0.5f;
+        float btnY = 50f;
+        batch.draw(Resources.restartTexture, btnX, btnY, btn, btn);
+
+        batch.end();
+
+        // Restart on click anywhere on the button.
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            float ux = toUiX(Gdx.input.getX());
+            float uy = toUiY(Gdx.input.getY());
+            if (ux >= btnX && ux <= btnX + btn && uy >= btnY && uy <= btnY + btn) {
+                ((com.badlogic.gdx.Game) Gdx.app.getApplicationListener()).setScreen(new GameScreen());
             }
         }
     }
@@ -781,16 +933,22 @@ public class GameScreen implements Screen {
             player.recharge(delta);
 
             if (!trail.isEmpty()) {
+                int deposited = 0;
                 for (Resource r : trail) {
                     int v = r.getVariant();
                     if (v >= 0 && v < storageCounts.length) {
                         storageCounts[v]++;
                     }
                     entityManager.removeEntity(r);
+                    deposited++;
                 }
                 trail.clear();
                 Resources.powerUpSound.play();
                 player.heal(delta * 20); // Healing when at house
+                totalDeposits += deposited;
+                if (boss == null && totalDeposits >= BOSS_DEPOSIT_THRESHOLD) {
+                    spawnBoss();
+                }
             }
         }
     }
