@@ -404,14 +404,21 @@ public class GameScreen implements Screen {
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0, 0, 0, 1f);
 
-        if (!playerInside) {
+        // Interior view is suppressed during cinematic states so the boss
+        // reveal pan and the wither overlay aren't blocked by the four walls
+        // when the trigger fires while the player is still inside the house.
+        boolean showInterior = playerInside
+            && state != State.BOSS_INTRO
+            && state != State.WITHER;
+
+        if (!showInterior) {
             mapRenderer.setView(camera);
             mapRenderer.render();
         }
 
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
-        if (playerInside) {
+        if (showInterior) {
             renderInsideView();
         } else {
             entityManager.render(batch);
