@@ -55,7 +55,7 @@ public class GameScreen implements Screen {
      *   WITHER ─▶ END (silent end screen with restart)
      *   PLAYING ─[HP=0]─▶ GAMEOVER
      */
-    private enum State { PLAYING, BOSS_INTRO, WITHER, END, GAMEOVER }
+    private enum State { PLAYING, BOSS_INTRO, WITHER, PLANET_REVEAL, END, GAMEOVER }
     private State state = State.PLAYING;
 
     // Boss arc
@@ -66,6 +66,17 @@ public class GameScreen implements Screen {
     private float bossIntroTimer = 0f;
     private float witherTimer = 0f;
     private int totalDeposits = 0;
+
+    // Planet destruction cinematic
+    private static final float PLANET_DURATION = 6f;
+    private static final float PLANET_SHATTER_AT = 4.3f;
+    private static final int NUM_CHUNKS = 8;
+    private float planetTimer = 0f;
+    private final Vector2[] chunkPos = new Vector2[NUM_CHUNKS];
+    private final Vector2[] chunkVel = new Vector2[NUM_CHUNKS];
+    private final float[] chunkRot = new float[NUM_CHUNKS];
+    private final float[] chunkRotVel = new float[NUM_CHUNKS];
+    private boolean chunksInitialized = false;
 
     private static final int VIRTUAL_WIDTH = 640;
     private static final int VIRTUAL_HEIGHT = 360;
@@ -268,6 +279,10 @@ public class GameScreen implements Screen {
             renderEndScreen();
             return;
         }
+        if (state == State.PLANET_REVEAL) {
+            renderPlanetReveal(delta);
+            return;
+        }
 
         tryStartMusic();
 
@@ -294,6 +309,11 @@ public class GameScreen implements Screen {
             monsterSystem.update(delta, player);
             resourceSystem.update(delta, player);
             particleSystem.update(delta);
+            // Boss has phase-dependent AI (chase shell, flee cute) — only active
+            // once the intro pan has handed control back to the player.
+            if (boss != null && state == State.PLAYING) {
+                boss.updateAI(player, delta);
+            }
 
             // Monster contact deals continuous tick damage. Any HP drop this frame
             // refreshes the screen-shake — when contact breaks, shake decays out.
@@ -328,7 +348,11 @@ public class GameScreen implements Screen {
             if (bossIntroTimer <= 0f) state = State.PLAYING;
         } else if (state == State.WITHER) {
             witherTimer -= delta;
-            if (witherTimer <= 0f) state = State.END;
+            if (witherTimer <= 0f) {
+                state = State.PLANET_REVEAL;
+                planetTimer = 0f;
+                chunksInitialized = false;
+            }
         }
 
         // Smooth Camera Follow (LERP) — keep float precision in cameraTargetX/Y
@@ -588,39 +612,165 @@ public class GameScreen implements Screen {
         batch.end();
     }
 
-    private void renderEndScreen() {
-        ScreenUtils.clear(0.04f, 0f, 0f, 1f);
+    private void renderPlanetReveal(float delta) {
+        planetTimer += delta;
+
+        // --- Animation parameters keyed off the timeline. ---
+        float t = planetTimer;
+        float planetSize = 160f;
+        float cx = UI_W * 0.5f;
+        float cy = UI_H * 0.5f;
+
+        // Ease-in: planet appears small in the distance, grows to full size.
+        float growIn = Math.min(1f, t / 0.8f);
+        float scale = 0.2f + 0.8f * growIn;
+
+        // Healthy → corrupted color ramp before shatter. Stays in (R,G,B) so
+        // we can express it as a batch.setColor() tint multiplying the texture.
+        float corrupt = clamp01((t - 1.6f) / 2.5f); // 0..1 over the corruption window
+
+        // Heavy shake right before shatter.
+        float shake = 0f;
+        if (t > 3.0f && t < PLANET_SHATTER_AT) {
+            shake = 1.5f + 3f * ((t - 3.0f) / (PLANET_SHATTER_AT - 3.0f));
+        }
+        float ox = MathUtils.random(-shake, shake);
+        float oy = MathUtils.random(-shake, shake);
+
+        boolean shattered = t >= PLANET_SHATTER_AT;
+        if (shattered && !chunksInitialized) {
+            initializeChunks(cx, cy);
+            chunksInitialized = true;
+            triggerShake(6f);
+            Resources.powerUpSound.play(); // re-purpose as a "BOOM"
+        }
+
+        // White flash spans the shatter moment — a short, hot spike of brightness.
+        float flashWindow = 0.25f;
+        float flash = 0f;
+        if (t >= PLANET_SHATTER_AT - flashWindow && t <= PLANET_SHATTER_AT + flashWindow) {
+            float fd = Math.abs(t - PLANET_SHATTER_AT);
+            flash = 1f - fd / flashWindow;
+        }
+
+        // --- Render ---
+        ScreenUtils.clear(0f, 0f, 0f, 1f);
         batch.getProjectionMatrix().setToOrtho2D(0, 0, UI_W, UI_H);
         batch.begin();
 
-        // Cute creature corpse — drawn rotated 90° to read as "lying down".
-        // Once you have real art, swap this for a dedicated death sprite.
-        TextureRegion corpse = new TextureRegion(Resources.bossCuteTexture);
-        float corpseSize = 64f;
-        float corpseX = UI_W * 0.5f - 70f;
-        float corpseY = UI_H * 0.5f - 20f;
-        batch.setColor(0.55f, 0.35f, 0.45f, 1f); // desaturated, lifeless
-        batch.draw(corpse,
-            corpseX, corpseY, corpseSize * 0.5f, corpseSize * 0.5f,
-            corpseSize, corpseSize, 1f, 1f, 90f);
+        // Starfield backdrop, slightly drifting via a subtle scale pump.
+        batch.setColor(Color.WHITE);
+        batch.draw(Resources.starsTexture, 0, 0, UI_W, UI_H);
 
-        // Evil lil guy standing over the corpse — same sprite, blood-red tint.
-        batch.setColor(0.7f, 0.1f, 0.1f, 1f);
-        float pSize = 48f;
-        batch.draw(Resources.playerFront,
-            UI_W * 0.5f + 20f, UI_H * 0.5f - 16f, pSize, pSize);
+        if (!shattered) {
+            // Intact planet, increasingly corrupted as t advances.
+            float r = 1f + 0.4f * corrupt;
+            float g = 1f - 0.5f * corrupt;
+            float b = 1f - 0.6f * corrupt;
+            batch.setColor(r, g, b, 1f);
+            float sz = planetSize * scale;
+            batch.draw(Resources.planetTexture,
+                cx - sz * 0.5f + ox, cy - sz * 0.5f + oy, sz, sz);
 
-        // Restart button — reuse the existing restart icon so the affordance
-        // matches the game-over screen the player already saw (if any).
+            // Crack glow — six veins of red dots stretching from center outward,
+            // getting longer and brighter as corruption ramps. Done with stacked
+            // small quads so we don't need a proper line primitive.
+            if (corrupt > 0.2f) {
+                batch.setColor(1f, 0.2f, 0.05f, 0.9f * corrupt);
+                int rays = 6;
+                float crackLen = sz * 0.45f * corrupt;
+                for (int i = 0; i < rays; i++) {
+                    double a = i * (Math.PI * 2.0 / rays) + 0.4;
+                    float ux = (float) Math.cos(a);
+                    float uy = (float) Math.sin(a);
+                    int steps = 6;
+                    for (int j = 1; j <= steps; j++) {
+                        float jt = j / (float) steps;
+                        float px = cx + ox + ux * crackLen * jt - 1f;
+                        float py = cy + oy + uy * crackLen * jt - 1f;
+                        batch.draw(Resources.pixelTexture, px, py, 2f, 2f);
+                    }
+                    // Bright spark at the tip.
+                    batch.draw(Resources.pixelTexture,
+                        cx + ox + ux * crackLen - 1.5f,
+                        cy + oy + uy * crackLen - 1.5f, 3f, 3f);
+                }
+            }
+        } else {
+            // Update + draw chunks. Each chunk drifts and rotates outward.
+            for (int i = 0; i < NUM_CHUNKS; i++) {
+                chunkPos[i].x += chunkVel[i].x * delta;
+                chunkPos[i].y += chunkVel[i].y * delta;
+                chunkRot[i] += chunkRotVel[i] * delta;
+                // Soft drag so chunks don't fly to infinity instantly.
+                chunkVel[i].scl(0.985f);
+
+                float size = 22f;
+                // Fade as they get further from center.
+                float dx = chunkPos[i].x - cx;
+                float dy = chunkPos[i].y - cy;
+                float dist = (float) Math.sqrt(dx * dx + dy * dy);
+                float alpha = clamp01(1f - dist / 320f);
+                batch.setColor(1f, 1f, 1f, alpha);
+                batch.draw(new TextureRegion(Resources.chunkTexture),
+                    chunkPos[i].x - size * 0.5f, chunkPos[i].y - size * 0.5f,
+                    size * 0.5f, size * 0.5f, size, size,
+                    1f, 1f, chunkRot[i]);
+            }
+
+            // Lingering red afterglow at the destruction site, decaying.
+            float afterglow = clamp01(1f - (t - PLANET_SHATTER_AT) / 1.2f);
+            if (afterglow > 0f) {
+                batch.setColor(1f, 0.3f, 0.1f, 0.5f * afterglow);
+                float gSz = 80f * afterglow + 40f;
+                batch.draw(Resources.pixelTexture,
+                    cx - gSz * 0.5f, cy - gSz * 0.5f, gSz, gSz);
+            }
+        }
+
+        // White flash sits on top of everything else.
+        if (flash > 0f) {
+            batch.setColor(1f, 1f, 1f, flash);
+            batch.draw(Resources.pixelTexture, 0, 0, UI_W, UI_H);
+        }
+
+        batch.setColor(Color.WHITE);
+        batch.end();
+
+        // Hand off to the end card once the cinematic timer expires.
+        if (t >= PLANET_DURATION) {
+            state = State.END;
+        }
+    }
+
+    private void initializeChunks(float cx, float cy) {
+        for (int i = 0; i < NUM_CHUNKS; i++) {
+            double a = i * (Math.PI * 2.0 / NUM_CHUNKS) + MathUtils.random(-0.3f, 0.3f);
+            float speed = MathUtils.random(110f, 180f);
+            chunkPos[i] = new Vector2(cx, cy);
+            chunkVel[i] = new Vector2((float) Math.cos(a) * speed, (float) Math.sin(a) * speed);
+            chunkRot[i] = MathUtils.random(0f, 360f);
+            chunkRotVel[i] = MathUtils.random(-200f, 200f);
+        }
+    }
+
+    private static float clamp01(float v) {
+        return v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    private void renderEndScreen() {
+        ScreenUtils.clear(0f, 0f, 0f, 1f);
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, UI_W, UI_H);
+        batch.begin();
+
         batch.setColor(Color.WHITE);
         float btn = 48f;
         float btnX = (UI_W - btn) * 0.5f;
-        float btnY = 50f;
+        float btnY = (UI_H - btn) * 0.5f;
         batch.draw(Resources.restartTexture, btnX, btnY, btn, btn);
 
         batch.end();
 
-        // Restart on click anywhere on the button.
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
             float ux = toUiX(Gdx.input.getX());
             float uy = toUiY(Gdx.input.getY());

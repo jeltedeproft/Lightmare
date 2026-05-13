@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 
 /**
  * Two-phase boss: starts wearing an intimidating "shell" and, on the first
@@ -17,7 +18,13 @@ public class Boss extends Entity {
     private static final float SHELL_H = 64f;
     private static final float CUTE_W = 32f;
     private static final float CUTE_H = 32f;
-    private static final int MAX_HP = 5;
+    private static final int MAX_HP = 7;
+    /** Hits before the shell shatters. Remaining hits play out in cute phase. */
+    private static final int SHELL_HITS = 3;
+    private static final float SHELL_CHASE_SPEED = 38f;
+    private static final float CUTE_FLEE_SPEED = 55f;
+    private static final float CONTACT_RANGE = 22f;
+    private static final float CONTACT_DPS = 18f;
     private static final float FLASH_DURATION = 0.18f;
 
     private final TextureRegion shellRegion;
@@ -37,11 +44,36 @@ public class Boss extends Entity {
         if (flashTimer > 0f) flashTimer -= delta;
     }
 
+    /**
+     * Phase-dependent movement. Shell phase chases the player and applies
+     * contact damage on close range — the fight needs the player moving.
+     * Cute phase flees, so the player has to chase a tiny target down.
+     */
+    public void updateAI(Player player, float delta) {
+        if (isDead()) return;
+        Vector2 toPlayer = new Vector2(
+            player.getPosition().x - position.x,
+            player.getPosition().y - position.y);
+        float dist = toPlayer.len();
+        if (dist > 0.001f) toPlayer.scl(1f / dist);
+
+        if (!shellBroken) {
+            position.x += toPlayer.x * SHELL_CHASE_SPEED * delta;
+            position.y += toPlayer.y * SHELL_CHASE_SPEED * delta;
+            if (dist < CONTACT_RANGE) {
+                player.takeDamage(CONTACT_DPS * delta);
+            }
+        } else {
+            position.x -= toPlayer.x * CUTE_FLEE_SPEED * delta;
+            position.y -= toPlayer.y * CUTE_FLEE_SPEED * delta;
+        }
+    }
+
     /** @return true if this hit killed the boss. */
     public boolean takeHit() {
         hp--;
         flashTimer = FLASH_DURATION;
-        if (!shellBroken) {
+        if (!shellBroken && hp <= MAX_HP - SHELL_HITS) {
             shellBroken = true;
             region = cuteRegion;
             // Shrink and re-center so the cute body stays where the shell was.

@@ -37,6 +37,12 @@ public class Resources {
     // Boss placeholders — programmatic until real art lands.
     public static Texture bossShellTexture;
     public static Texture bossCuteTexture;
+
+    // Planet-destruction cinematic placeholders.
+    public static Texture starsTexture;
+    public static Texture planetTexture;
+    public static Texture brokenPlanetTexture;
+    public static Texture chunkTexture;
     /** rock_blue, rock_green, rock_orange, rock_purple — pick a random index per spawn. */
     public static TextureRegion[] oreRegions;
     public static String[] oreNames = {"rock_blue", "rock_green", "rock_orange", "rock_purple"};
@@ -76,6 +82,11 @@ public class Resources {
 
         bossShellTexture = createBossShellPlaceholder(64, 64);
         bossCuteTexture = createBossCutePlaceholder(32, 32);
+
+        starsTexture = createStarsPlaceholder(640, 360);
+        planetTexture = createPlanetPlaceholder(128);
+        brokenPlanetTexture = createBrokenPlanetPlaceholder(128);
+        chunkTexture = createChunkPlaceholder(20);
         oreRegions = new TextureRegion[oreNames.length];
         for (int i = 0; i < oreNames.length; i++) {
             oreRegions[i] = atlas.findRegion(oreNames[i]);
@@ -253,6 +264,109 @@ public class Resources {
         return t;
     }
 
+    private static Texture createStarsPlaceholder(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0.02f, 0.02f, 0.05f, 1f);
+        p.fill();
+        java.util.Random rng = new java.util.Random(42);
+        p.setColor(0.9f, 0.9f, 1f, 1f);
+        for (int i = 0; i < 220; i++) {
+            int x = rng.nextInt(w);
+            int y = rng.nextInt(h);
+            p.fillCircle(x, y, 1);
+        }
+        // A handful of slightly brighter accent stars.
+        for (int i = 0; i < 18; i++) {
+            int x = rng.nextInt(w);
+            int y = rng.nextInt(h);
+            p.fillCircle(x, y, 2);
+        }
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createPlanetPlaceholder(int size) {
+        Pixmap p = new Pixmap(size, size, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        int cx = size / 2;
+        int cy = size / 2;
+        int r = size / 2 - 2;
+        // Ocean base.
+        p.setColor(0.15f, 0.35f, 0.65f, 1f);
+        p.fillCircle(cx, cy, r);
+        // Continents — kept well inside so they don't square off at the edge.
+        java.util.Random rng = new java.util.Random(7);
+        p.setColor(0.25f, 0.55f, 0.25f, 1f);
+        for (int i = 0; i < 6; i++) {
+            int contR = 6 + rng.nextInt(7);
+            int maxOff = r - contR - 2;
+            int dx = -maxOff + rng.nextInt(2 * maxOff + 1);
+            int dy = -maxOff + rng.nextInt(2 * maxOff + 1);
+            p.fillCircle(cx + dx, cy + dy, contR);
+        }
+        // Cloud highlight band.
+        p.setColor(1f, 1f, 1f, 0.5f);
+        p.fillCircle(cx - 10, cy - 8, 4);
+        p.fillCircle(cx + 12, cy + 4, 3);
+        // Terminator shadow on the right edge for a 3-D read.
+        p.setColor(0f, 0f, 0f, 0.45f);
+        for (int i = 0; i < 8; i++) p.drawCircle(cx + i, cy, r - i);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createBrokenPlanetPlaceholder(int size) {
+        Pixmap p = new Pixmap(size, size, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        int cx = size / 2;
+        int cy = size / 2;
+        int r = size / 2 - 2;
+        // Dead-grey base.
+        p.setColor(0.18f, 0.16f, 0.16f, 1f);
+        p.fillCircle(cx, cy, r);
+        // Glowing red lava cracks radiating from center.
+        p.setColor(0.95f, 0.25f, 0.05f, 1f);
+        for (int i = 0; i < 5; i++) {
+            double a = i * (Math.PI * 2.0 / 5.0) + 0.4;
+            int x2 = (int) Math.round(cx + Math.cos(a) * (r - 2));
+            int y2 = (int) Math.round(cy + Math.sin(a) * (r - 2));
+            p.drawLine(cx, cy, x2, y2);
+            p.drawLine(cx + 1, cy, x2 + 1, y2);
+        }
+        // Bite missing from the top-right — that satisfying "chunk gone" silhouette.
+        p.setColor(0f, 0f, 0f, 0f);
+        p.fillCircle(cx + r / 2, cy - r / 2, r / 3);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createChunkPlaceholder(int size) {
+        Pixmap p = new Pixmap(size, size, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        int cx = size / 2;
+        int cy = size / 2;
+        int r = size / 2 - 2;
+        // Dark crust.
+        p.setColor(0.25f, 0.18f, 0.12f, 1f);
+        p.fillCircle(cx, cy, r);
+        // Lava core peeking through.
+        p.setColor(0.95f, 0.35f, 0.10f, 1f);
+        p.fillCircle(cx - 1, cy - 1, r - 3);
+        // Thin dark rim.
+        p.setColor(0.10f, 0.06f, 0.05f, 1f);
+        p.drawCircle(cx, cy, r);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
+    }
+
     private static Texture createColoredTexture(int width, int height, Color color) {
         Pixmap pixmap = new Pixmap(width, height, Pixmap.Format.RGBA8888);
         pixmap.setColor(color);
@@ -323,5 +437,9 @@ public class Resources {
         if (iconLight != null) iconLight.dispose();
         if (bossShellTexture != null) bossShellTexture.dispose();
         if (bossCuteTexture != null) bossCuteTexture.dispose();
+        if (starsTexture != null) starsTexture.dispose();
+        if (planetTexture != null) planetTexture.dispose();
+        if (brokenPlanetTexture != null) brokenPlanetTexture.dispose();
+        if (chunkTexture != null) chunkTexture.dispose();
     }
 }
