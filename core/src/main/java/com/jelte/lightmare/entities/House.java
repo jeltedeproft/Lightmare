@@ -16,6 +16,13 @@ public class House extends Entity {
     // 1× → x≈135 at 2×, minus half of DOOR_WIDTH).
     public static final float DOOR_X_OFFSET = 119f;
 
+    // Big open garage on the left of the south wall — the second walkable
+    // entrance. Tuned to sit under the dark archway on house.png (sprite
+    // x≈15-56 at 1× → roughly x=30-112 at 2×); slightly inset so a strip of
+    // wall remains at the far left.
+    public static final float GARAGE_X_OFFSET = 24f;
+    public static final float GARAGE_WIDTH = 84f;
+
     private float lightRadius = 240f;
 
     public House(float x, float y, Texture texture) {
@@ -47,10 +54,15 @@ public class House extends Entity {
         return position.x + DOOR_X_OFFSET;
     }
 
+    public float getGarageX() {
+        return position.x + GARAGE_X_OFFSET;
+    }
+
     /**
      * AABB-vs-walls test. If {@code allowDoor} is true the south wall is split
-     * at the door — that's the player path. For monsters and the boss we pass
-     * false so the south wall is solid and they can't enter at all.
+     * around the garage and the door — both walkable for the player. For
+     * monsters and the boss we pass false so the south wall is solid and they
+     * can't enter at all.
      */
     public boolean isBlockedByWall(float x, float y, float w, float h, boolean allowDoor) {
         // North wall (top).
@@ -65,16 +77,25 @@ public class House extends Entity {
         if (overlaps(x, y, w, h,
             position.x + size.x - WALL_THICKNESS, position.y,
             WALL_THICKNESS, size.y)) return true;
-        // South wall — either split around the door for the player, or solid.
+        // South wall — three solid segments around the garage and the door for
+        // the player path, or one solid wall for monsters.
         if (allowDoor) {
-            float doorX = getDoorX();
-            float leftW = doorX - position.x;
+            float garageStart = position.x + GARAGE_X_OFFSET;
+            float garageEnd = garageStart + GARAGE_WIDTH;
+            float doorStart = position.x + DOOR_X_OFFSET;
+            float doorEnd = doorStart + DOOR_WIDTH;
+            // Left of garage.
+            float leftW = garageStart - position.x;
             if (leftW > 0f && overlaps(x, y, w, h,
                 position.x, position.y, leftW, WALL_THICKNESS)) return true;
-            float rightStart = doorX + DOOR_WIDTH;
-            float rightW = position.x + size.x - rightStart;
+            // Between garage and door.
+            float midW = doorStart - garageEnd;
+            if (midW > 0f && overlaps(x, y, w, h,
+                garageEnd, position.y, midW, WALL_THICKNESS)) return true;
+            // Right of door.
+            float rightW = position.x + size.x - doorEnd;
             if (rightW > 0f && overlaps(x, y, w, h,
-                rightStart, position.y, rightW, WALL_THICKNESS)) return true;
+                doorEnd, position.y, rightW, WALL_THICKNESS)) return true;
         } else {
             if (overlaps(x, y, w, h,
                 position.x, position.y, size.x, WALL_THICKNESS)) return true;

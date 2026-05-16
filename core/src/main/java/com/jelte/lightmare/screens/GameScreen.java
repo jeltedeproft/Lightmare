@@ -977,11 +977,14 @@ public class GameScreen implements Screen {
             hp.x + wallThickness, hp.y + wallThickness,
             hs.x - 2f * wallThickness, hs.y - 2f * wallThickness);
 
-        // Door gap in the south wall — uses the same House.getDoorX() as the
-        // collision logic so the visible threshold lines up with the passage.
+        // Door + garage gaps in the south wall — uses the same House getters
+        // as the collision logic so the visible thresholds line up with each
+        // passage.
         batch.setColor(0.65f, 0.5f, 0.28f, 1f);
         batch.draw(Resources.pixelTexture,
             house.getDoorX(), hp.y, House.DOOR_WIDTH, wallThickness);
+        batch.draw(Resources.pixelTexture,
+            house.getGarageX(), hp.y, House.GARAGE_WIDTH, wallThickness);
 
         // Four storage chests along the back wall, one per ore variant.
         // Chest body is tinted to match the ore color, the ore sprite sits on
