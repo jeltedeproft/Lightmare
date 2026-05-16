@@ -138,9 +138,7 @@ public class GameScreen implements Screen {
     private RayHandler rayHandler;
     private PointLight playerLight;
     private PointLight emergencyLight;
-    // The house has no PointLight — instead it's drawn as a sharp white
-    // rectangle directly into the light FBO each frame, which matches its
-    // silhouette from outside and keeps the interior uniformly bright.
+    private PointLight houseLight;
 
     // Per-bullet PointLights (small red tracer glow). Created in fireBullet,
     // position-synced each frame in updateBullets, removed when the bullet
@@ -158,10 +156,6 @@ public class GameScreen implements Screen {
     private TextureRegion fboRegion;
     private TextureRegion lightFboRegion;
     private ShaderProgram ditherShader;
-    // Custom shader for the house's rectangular dithered light.
-    private ShaderProgram houseLightShader;
-    /** Pixels by which the house's light glow extends beyond its bounds. */
-    private static final float HOUSE_LIGHT_PADDING = 48f;
 
     // Tiled background
     private TiledMap tiledMap;
@@ -191,7 +185,6 @@ public class GameScreen implements Screen {
         lightFboRegion.flip(false, true);
 
         ditherShader = Shaders.createDitherShader();
-        houseLightShader = Shaders.createHouseRectShader();
 
         // Tiled background. Force nearest filter on the tileset so it stays
         // crisp through the FBO upscale (the default is Linear, which would
@@ -253,9 +246,8 @@ public class GameScreen implements Screen {
             Resources.brokenRobotTexture, Resources.workingRobotTexture);
 
         // Add lights — monochrome (color white, alpha = strength) so the dither
-        // composite operates on a single brightness channel. The house has no
-        // PointLight; see the LIGHT PASS where a fully-bright rectangle is
-        // painted at its footprint.
+        // composite operates on a single brightness channel.
+        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), house.getLightRadius(), house.getCenterX(), house.getCenterY());
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
@@ -488,28 +480,6 @@ public class GameScreen implements Screen {
         lightFbo.begin();
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0f, 0f, 0f, 1f);
-
-        // Paint the house's footprint into the light FBO via a custom shader
-        // that mimics the PointLight's 3-ring dither, but with rectangular
-        // bands hugging the house outline. Inside: brightness 1.0 (fully lit
-        // interior). Just outside: dithered middle/outer rings extending
-        // HOUSE_LIGHT_PADDING pixels in every direction.
-        float pad = HOUSE_LIGHT_PADDING;
-        float quadX = house.getPosition().x - pad;
-        float quadY = house.getPosition().y - pad;
-        float quadW = house.getSize().x + 2f * pad;
-        float quadH = house.getSize().y + 2f * pad;
-
-        batch.setShader(houseLightShader);
-        batch.setProjectionMatrix(camera.combined);
-        batch.begin();
-        houseLightShader.setUniformf("u_padding", pad);
-        houseLightShader.setUniformf("u_innerSize", house.getSize().x, house.getSize().y);
-        houseLightShader.setUniformf("u_quadSize", quadW, quadH);
-        batch.setColor(Color.WHITE);
-        batch.draw(Resources.pixelTexture, quadX, quadY, quadW, quadH);
-        batch.end();
-        batch.setShader(null);
 
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
@@ -1176,7 +1146,6 @@ public class GameScreen implements Screen {
         gameFbo.dispose();
         lightFbo.dispose();
         ditherShader.dispose();
-        houseLightShader.dispose();
         mapRenderer.dispose();
         tiledMap.dispose();
     }
