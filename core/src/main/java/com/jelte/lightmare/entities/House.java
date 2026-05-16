@@ -8,6 +8,11 @@ public class House extends Entity {
     public static final float WALL_THICKNESS = 8f;
     public static final float DOOR_WIDTH = 32f;
 
+    // X offset of the door's left edge from the house's left edge — tuned to
+    // sit under the small side door on the right of house.png (sprite x≈63-72
+    // in the 87-wide source, which scales to a rendered center around x=149).
+    public static final float DOOR_X_OFFSET = 117f;
+
     private float lightRadius = 240f;
 
     public House(float x, float y, Texture texture) {
@@ -36,7 +41,7 @@ public class House extends Entity {
     }
 
     public float getDoorX() {
-        return position.x + (size.x - DOOR_WIDTH) * 0.5f;
+        return position.x + DOOR_X_OFFSET;
     }
 
     /**

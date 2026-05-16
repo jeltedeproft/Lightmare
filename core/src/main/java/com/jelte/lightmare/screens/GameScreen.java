@@ -30,6 +30,8 @@ import com.badlogic.gdx.utils.viewport.Viewport;
 import com.jelte.lightmare.Resources;
 import com.jelte.lightmare.Shaders;
 import com.jelte.lightmare.entities.Boss;
+import com.jelte.lightmare.entities.BrokenRobot;
+import com.jelte.lightmare.entities.Bullet;
 import com.jelte.lightmare.entities.Entity;
 import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
@@ -58,14 +60,13 @@ public class GameScreen implements Screen {
     private enum State { PLAYING, BOSS_INTRO, WITHER, PLANET_REVEAL, END, GAMEOVER }
     private State state = State.PLAYING;
 
-    // Boss arc
-    private static final int BOSS_DEPOSIT_THRESHOLD = 25;
+    // Boss arc — triggered once every robot part is unlocked, i.e. the full
+    // exoskeleton is assembled on the player.
     private static final float BOSS_INTRO_DURATION = 1.8f;
     private static final float WITHER_DURATION = 3.5f;
     private Boss boss;
     private float bossIntroTimer = 0f;
     private float witherTimer = 0f;
-    private int totalDeposits = 0;
 
     // Planet destruction cinematic
     private static final float PLANET_DURATION = 6f;
@@ -94,13 +95,12 @@ public class GameScreen implements Screen {
     private UpgradeSystem upgradeSystem;
     private PlayerController playerController;
 
-    // Upgrade machine + panel state. Machine position is set once the house
-    // is built (see constructor) and lives in world space so the same AABB
-    // can be used for both rendering and click detection.
+    // Upgrade machine — kept as a decorative prop on the left wall inside the
+    // house. Unlocks are now triggered automatically when a chest hits the ore
+    // threshold, so the machine no longer has a click handler attached.
     private static final float MACHINE_W = 32f;
     private static final float MACHINE_H = 32f;
     private float machineX, machineY;
-    private boolean upgradePanelOpen = false;
 
     // Juice
     private static final float SHAKE_DURATION = 0.2f;
@@ -108,6 +108,12 @@ public class GameScreen implements Screen {
     private float shakeTimer = 0f;
     private float prevHp;
     private float flickerTimer = 0f;
+
+    // Robot footsteps — play robotwalk.wav on a fixed cadence whenever the
+    // player is moving and the legs upgrade has been bought (lilguy's bare feet
+    // stay silent).
+    private static final float FOOTSTEP_INTERVAL = 0.35f;
+    private float footstepCooldown = 0f;
 
     // House interior state
     private boolean playerInside = false;
@@ -122,6 +128,7 @@ public class GameScreen implements Screen {
     private final int[] storageCounts = new int[4];
     private Player player;
     private House house;
+    private BrokenRobot brokenRobot;
     private List<Resource> trail = new ArrayList<>();
 
     // Lighting
@@ -129,7 +136,9 @@ public class GameScreen implements Screen {
     private RayHandler rayHandler;
     private PointLight playerLight;
     private PointLight emergencyLight;
-    private PointLight houseLight;
+    // The house has no PointLight — instead it's drawn as a sharp white
+    // rectangle directly into the light FBO each frame, which matches its
+    // silhouette from outside and keeps the interior uniformly bright.
 
     // Pixel-art render targets. The world is drawn at full brightness into
     // gameFbo. Lights (with the dither shader) are drawn additively into a
@@ -219,6 +228,17 @@ public class GameScreen implements Screen {
         entityManager.addEntity(house);
         entityManager.addEntity(player);
 
+        // Story prop: a broken robot slumped on the floor inside the house —
+        // placed between the upgrade machine (left wall) and the door (right
+        // side) so the player sees it immediately on spawning. Drawn manually
+        // by renderInsideView (not via entityManager) so it doesn't bleed
+        // through the house sprite when the player is outside. Sprite swaps
+        // to the "working" robot once every part has been repaired.
+        float robotX = house.getPosition().x + 100f;
+        float robotY = house.getPosition().y + 24f;
+        brokenRobot = new BrokenRobot(robotX, robotY,
+            Resources.brokenRobotTexture, Resources.workingRobotTexture);
+
         // Add lights
         // Monochrome lights — color is white, alpha controls relative strength
         // so the composite dither operates on a single brightness channel.
@@ -286,17 +306,11 @@ public class GameScreen implements Screen {
 
         tryStartMusic();
 
-        // Closing the panel via ESC is checked before reading any other input
-        // so the close-then-rerelease can happen on the same frame.
-        if (upgradePanelOpen && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
-            upgradePanelOpen = false;
-        }
-
         // WITHER is a frozen cinematic — everything pauses while the world dies.
         // BOSS_INTRO keeps the world ticking but locks player input so the
         // camera pan reads as "the game is showing you something".
         boolean updatesFrozen = state == State.WITHER;
-        boolean playerInputAllowed = state == State.PLAYING && !upgradePanelOpen;
+        boolean playerInputAllowed = state == State.PLAYING;
 
         // Update logic
         float dx = playerInputAllowed ? playerController.getHorizontalInput() : 0f;
@@ -308,10 +322,13 @@ public class GameScreen implements Screen {
                 isBlockedByRocks(x, y, w, h)
                     || house.isBlockedByWall(x, y, w, h, true));
 
+            updateFootsteps(dx, dy, delta);
+
             entityManager.update(delta);
             monsterSystem.update(delta, player);
             resourceSystem.update(delta, player);
             particleSystem.update(delta);
+            updateBullets();
             // Boss has phase-dependent AI (chase shell, flee cute) — only active
             // once the intro pan has handed control back to the player.
             if (boss != null && state == State.PLAYING) {
@@ -333,14 +350,8 @@ public class GameScreen implements Screen {
         // Test player against house bounds (use sprite center) for the inside-view toggle.
         playerInside = house.containsPoint(player.getPosition().x + 8, player.getPosition().y + 8);
 
-        // Panel only makes sense inside the house — close if the player leaves.
-        if (upgradePanelOpen && !playerInside) {
-            upgradePanelOpen = false;
-        }
-
-        // Click to Mine / open upgrade panel / interact with panel / hit boss.
-        // Locked during cinematic states so the player can't, e.g., mine while
-        // the boss reveal is panning the camera.
+        // Click to Mine / shoot / hit boss. Locked during cinematic states so
+        // the player can't, e.g., mine while the boss reveal is panning.
         if (state == State.PLAYING) {
             handleClicks();
         }
@@ -449,15 +460,8 @@ public class GameScreen implements Screen {
             renderInsideView();
         } else {
             entityManager.render(batch);
-            // Outside door indicator — a darker plank in the south wall so the
-            // entrance is visually findable from outside.
-            float doorY = house.getPosition().y;
-            float doorX = house.getDoorX();
-            batch.setColor(0.40f, 0.25f, 0.12f, 1f);
-            batch.draw(Resources.pixelTexture, doorX, doorY, House.DOOR_WIDTH, 6f);
-            batch.setColor(0.55f, 0.35f, 0.18f, 1f);
-            batch.draw(Resources.pixelTexture, doorX, doorY + 6f, House.DOOR_WIDTH, 2f);
-            batch.setColor(Color.WHITE);
+            // No programmatic door overlay — the house.png sprite already shows
+            // the door art, and the logical doorway sits under it via DOOR_X_OFFSET.
         }
         particleSystem.render(batch);
         renderHomeIndicator(delta);
@@ -516,22 +520,10 @@ public class GameScreen implements Screen {
             renderWitherOverlay(t);
         }
 
-        if (upgradePanelOpen) {
-            renderUpgradePanel();
-        }
     }
 
     private void handleClicks() {
         if (!Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) return;
-
-        // Panel takes click priority — any click goes to panel slots or closes
-        // it. Use the fixed-UI coord space so the panel lives in screen pixels.
-        if (upgradePanelOpen) {
-            float uiX = toUiX(Gdx.input.getX());
-            float uiY = toUiY(Gdx.input.getY());
-            handleUpgradePanelClick(uiX, uiY);
-            return;
-        }
 
         // viewport.unproject uses the letterboxed GL viewport (not the full
         // canvas), so clicks map correctly even when the window aspect
@@ -539,13 +531,11 @@ public class GameScreen implements Screen {
         Vector3 worldCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
         viewport.unproject(worldCoords);
 
-        // Click on the upgrade machine (only relevant when inside the house —
-        // outside, the machine sprite isn't drawn).
-        if (playerInside
-            && worldCoords.x >= machineX && worldCoords.x <= machineX + MACHINE_W
-            && worldCoords.y >= machineY && worldCoords.y <= machineY + MACHINE_H) {
-            upgradePanelOpen = true;
-            return;
+        // Fire a bullet whenever the gun is fully assembled. Bullets travel
+        // through ores harmlessly, so the same click still mines or hits the
+        // boss via the checks below — shooting is purely additive once unlocked.
+        if (upgradeSystem.gunReady()) {
+            fireBullet(worldCoords.x, worldCoords.y);
         }
 
         // Click on the boss — close-range attack like mining. After 5 hits the
@@ -591,6 +581,78 @@ public class GameScreen implements Screen {
         }
     }
 
+    private void updateFootsteps(float dx, float dy, float delta) {
+        boolean moving = dx != 0f || dy != 0f;
+        if (!moving || !player.hasLegs()) {
+            // Reset so the very next step plays without waiting for a cooldown.
+            footstepCooldown = 0f;
+            return;
+        }
+        footstepCooldown -= delta;
+        if (footstepCooldown <= 0f) {
+            Resources.robotwalkSound.play();
+            footstepCooldown = FOOTSTEP_INTERVAL;
+        }
+    }
+
+    private void syncPlayerParts() {
+        player.setHasLegs(upgradeSystem.isUnlocked(Upgrade.LEGS));
+        player.setHasDrill(upgradeSystem.isUnlocked(Upgrade.DRILL));
+        player.setHasGun(upgradeSystem.isUnlocked(Upgrade.GUN));
+    }
+
+    private void fireBullet(float targetX, float targetY) {
+        // Originate at the player's visual center so bullets read as coming
+        // from the body rather than the corner of the AABB.
+        float ox = player.getPosition().x + 8f;
+        float oy = player.getPosition().y + 8f;
+        entityManager.addEntity(new Bullet(ox, oy, targetX - ox, targetY - oy));
+        Resources.gunshotSound.play();
+    }
+
+    private void updateBullets() {
+        // Single pass over the entity list: each live bullet checks every
+        // monster and the boss, and is removed when spent or on impact.
+        List<Entity> toRemove = null;
+        for (Entity e : entityManager.getEntities()) {
+            if (!(e instanceof Bullet)) continue;
+            Bullet b = (Bullet) e;
+            if (b.isSpent()) {
+                if (toRemove == null) toRemove = new ArrayList<>();
+                toRemove.add(b);
+                continue;
+            }
+            // Monster collision — one-shot kill, matches the "they flee light" feel.
+            for (Entity other : entityManager.getEntities()) {
+                if (!(other instanceof Monster)) continue;
+                if (b.overlaps(other)) {
+                    if (toRemove == null) toRemove = new ArrayList<>();
+                    toRemove.add(other);
+                    b.markSpent();
+                    toRemove.add(b);
+                    triggerShake(1.5f);
+                    break;
+                }
+            }
+            if (b.isSpent()) continue;
+            // Boss collision — same hit-counting as a melee click.
+            if (boss != null && !boss.isDead() && b.overlaps(boss)) {
+                boolean killed = boss.takeHit();
+                triggerShake(killed ? 4f : 2f);
+                if (killed) {
+                    state = State.WITHER;
+                    witherTimer = WITHER_DURATION;
+                }
+                b.markSpent();
+                if (toRemove == null) toRemove = new ArrayList<>();
+                toRemove.add(b);
+            }
+        }
+        if (toRemove != null) {
+            for (Entity e : toRemove) entityManager.removeEntity(e);
+        }
+    }
+
     private void spawnBoss() {
         // East of the house, just out of the player's normal view, so the
         // intro pan is a small geographic reveal rather than a teleport feel.
@@ -600,9 +662,6 @@ public class GameScreen implements Screen {
         entityManager.addEntity(boss);
         state = State.BOSS_INTRO;
         bossIntroTimer = BOSS_INTRO_DURATION;
-        // If the player triggered the spawn from inside the upgrade panel,
-        // close it so the cinematic isn't drawn on top of stale UI.
-        upgradePanelOpen = false;
         triggerShake(3.5f);
     }
 
@@ -792,26 +851,10 @@ public class GameScreen implements Screen {
         }
     }
 
-    // --- Upgrade panel layout, drawn in a fixed 640x360 UI space. ---
+    // Fixed 640x360 UI projection used by the cinematic overlays and the end
+    // screen — the world camera moves but UI elements stay screen-locked.
     private static final float UI_W = 640f;
     private static final float UI_H = 360f;
-    private static final float PANEL_W = 420f;
-    private static final float PANEL_H = 240f;
-    private static final float SLOT_W = 80f;
-    private static final float SLOT_H = 180f;
-    private static final float CLOSE_SIZE = 18f;
-
-    private float panelX() { return (UI_W - PANEL_W) * 0.5f; }
-    private float panelY() { return (UI_H - PANEL_H) * 0.5f; }
-
-    private float slotX(int i) {
-        float gap = (PANEL_W - 4f * SLOT_W) / 5f;
-        return panelX() + gap + i * (SLOT_W + gap);
-    }
-    private float slotY() { return panelY() + 30f; }
-
-    private float closeBtnX() { return panelX() + PANEL_W - CLOSE_SIZE - 8f; }
-    private float closeBtnY() { return panelY() + PANEL_H - CLOSE_SIZE - 8f; }
 
     /** Convert a raw screen pixel to fixed UI X in [0, UI_W]. */
     private float toUiX(int screenX) {
@@ -820,146 +863,6 @@ public class GameScreen implements Screen {
     /** Convert a raw screen pixel to fixed UI Y in [0, UI_H] (Y up). */
     private float toUiY(int screenY) {
         return (1f - (float)(screenY - viewport.getTopGutterHeight()) / viewport.getScreenHeight()) * UI_H;
-    }
-
-    private void handleUpgradePanelClick(float ux, float uy) {
-        // Close button
-        if (ux >= closeBtnX() && ux <= closeBtnX() + CLOSE_SIZE
-            && uy >= closeBtnY() && uy <= closeBtnY() + CLOSE_SIZE) {
-            upgradePanelOpen = false;
-            return;
-        }
-        // Upgrade slots
-        for (int i = 0; i < Upgrade.values().length; i++) {
-            float sx = slotX(i), sy = slotY();
-            if (ux >= sx && ux <= sx + SLOT_W && uy >= sy && uy <= sy + SLOT_H) {
-                Upgrade u = Upgrade.values()[i];
-                if (upgradeSystem.canAfford(u, storageCounts)) {
-                    upgradeSystem.purchase(u, storageCounts, player);
-                    Resources.powerUpSound.play();
-                }
-                return;
-            }
-        }
-        // Click outside the panel body closes it.
-        float pxL = panelX(), pxR = panelX() + PANEL_W;
-        float pyB = panelY(), pyT = panelY() + PANEL_H;
-        if (ux < pxL || ux > pxR || uy < pyB || uy > pyT) {
-            upgradePanelOpen = false;
-        }
-    }
-
-    private void renderUpgradePanel() {
-        // Switch to fixed 640x360 UI projection so the panel is stationary on
-        // screen no matter where the world camera happens to be looking.
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, UI_W, UI_H);
-        batch.begin();
-
-        // Darken the world behind the panel.
-        batch.setColor(0f, 0f, 0f, 0.55f);
-        batch.draw(Resources.pixelTexture, 0, 0, UI_W, UI_H);
-
-        // Panel background + border.
-        batch.setColor(0.10f, 0.08f, 0.05f, 1f);
-        batch.draw(Resources.pixelTexture, panelX(), panelY(), PANEL_W, PANEL_H);
-        batch.setColor(0.55f, 0.40f, 0.20f, 1f);
-        drawRectOutline(panelX(), panelY(), PANEL_W, PANEL_H, 2f);
-
-        for (int i = 0; i < Upgrade.values().length; i++) {
-            renderUpgradeSlot(Upgrade.values()[i], slotX(i), slotY());
-        }
-
-        // Close button: an "X" universally read as "close" without text.
-        batch.setColor(0.6f, 0.6f, 0.6f, 1f);
-        drawX(closeBtnX(), closeBtnY(), CLOSE_SIZE);
-
-        batch.end();
-
-        // Restore for any subsequent draws (renderUI does its own anyway).
-        batch.setColor(Color.WHITE);
-    }
-
-    private void renderUpgradeSlot(Upgrade u, float sx, float sy) {
-        boolean affordable = upgradeSystem.canAfford(u, storageCounts);
-        boolean maxed = upgradeSystem.isMaxed(u);
-        int level = upgradeSystem.getLevel(u);
-
-        // Slot background tinted faintly with the ore color so the slot's
-        // payment ore is signalled before you even look at the cost row.
-        Color tint = STORAGE_COLORS[u.oreVariant];
-        batch.setColor(tint.r * 0.4f, tint.g * 0.4f, tint.b * 0.4f, 1f);
-        batch.draw(Resources.pixelTexture, sx, sy, SLOT_W, SLOT_H);
-        batch.setColor(tint);
-        drawRectOutline(sx, sy, SLOT_W, SLOT_H, 1f);
-
-        // Level pips along the top: filled circles for purchased levels,
-        // hollow for the remaining.
-        float pipR = 4f;
-        float pipGap = 4f;
-        float pipsTotalW = UpgradeSystem.MAX_LEVEL * (pipR * 2f) + (UpgradeSystem.MAX_LEVEL - 1) * pipGap;
-        float pipStartX = sx + (SLOT_W - pipsTotalW) * 0.5f + pipR;
-        float pipY = sy + SLOT_H - 12f;
-        for (int p = 0; p < UpgradeSystem.MAX_LEVEL; p++) {
-            float px = pipStartX + p * (pipR * 2f + pipGap);
-            // Hollow ring drawn with a small black inset for a "filled" pip,
-            // or a tinted ring for "empty".
-            batch.setColor(p < level ? Color.WHITE : new Color(0.3f, 0.3f, 0.3f, 1f));
-            batch.draw(Resources.pixelTexture, px - pipR, pipY - pipR, pipR * 2f, pipR * 2f);
-        }
-
-        // Stat icon — programmatically drawn so it's pure visual, no text.
-        Texture icon = iconFor(u);
-        float iconSize = 36f;
-        float ix = sx + (SLOT_W - iconSize) * 0.5f;
-        float iy = sy + SLOT_H * 0.5f - iconSize * 0.5f + 6f;
-        batch.setColor(affordable || maxed ? Color.WHITE : new Color(1f, 1f, 1f, 0.35f));
-        batch.draw(icon, ix, iy, iconSize, iconSize);
-
-        // Cost row: a stack of mini ore sprites showing what each level costs.
-        // Hidden once the upgrade hits its cap — no point displaying a cost
-        // the player can't pay any further.
-        if (!maxed) {
-            float oreSize = 12f;
-            float oreGap = 2f;
-            float costTotalW = UpgradeSystem.COST_PER_LEVEL * oreSize
-                + (UpgradeSystem.COST_PER_LEVEL - 1) * oreGap;
-            float costStartX = sx + (SLOT_W - costTotalW) * 0.5f;
-            float costY = sy + 10f;
-            batch.setColor(affordable ? Color.WHITE : new Color(1f, 1f, 1f, 0.4f));
-            for (int c = 0; c < UpgradeSystem.COST_PER_LEVEL; c++) {
-                batch.draw(Resources.oreRegions[u.oreVariant],
-                    costStartX + c * (oreSize + oreGap), costY, oreSize, oreSize);
-            }
-        }
-        batch.setColor(Color.WHITE);
-    }
-
-    private Texture iconFor(Upgrade u) {
-        switch (u) {
-            case BATTERY: return Resources.iconBattery;
-            case SPEED:   return Resources.iconSpeed;
-            case MINING:  return Resources.iconMining;
-            case LIGHT:   return Resources.iconLight;
-        }
-        return Resources.iconBattery;
-    }
-
-    private void drawRectOutline(float x, float y, float w, float h, float thickness) {
-        batch.draw(Resources.pixelTexture, x, y, w, thickness);
-        batch.draw(Resources.pixelTexture, x, y + h - thickness, w, thickness);
-        batch.draw(Resources.pixelTexture, x, y, thickness, h);
-        batch.draw(Resources.pixelTexture, x + w - thickness, y, thickness, h);
-    }
-
-    private void drawX(float x, float y, float size) {
-        // Two diagonal bars approximated with stacks of thin rectangles —
-        // pixelTexture has no rotation API per draw, so we fake it cheaply.
-        int steps = (int) size;
-        for (int i = 0; i < steps; i++) {
-            float t = i / (float) steps;
-            batch.draw(Resources.pixelTexture, x + t * size, y + t * size, 2f, 2f);
-            batch.draw(Resources.pixelTexture, x + t * size, y + (1f - t) * size, 2f, 2f);
-        }
     }
 
     private void renderGameOver() {
@@ -1047,21 +950,28 @@ public class GameScreen implements Screen {
             hp.x + wallThickness, hp.y + wallThickness,
             hs.x - 2f * wallThickness, hs.y - 2f * wallThickness);
 
-        // Door gap at the bottom-center of the south wall — visual cue for
-        // where the player walked in (and where they walk out).
-        float doorW = 32f;
-        float doorX = hp.x + (hs.x - doorW) * 0.5f;
+        // Door gap in the south wall — uses the same House.getDoorX() as the
+        // collision logic so the visible threshold lines up with the passage.
         batch.setColor(0.65f, 0.5f, 0.28f, 1f);
-        batch.draw(Resources.pixelTexture, doorX, hp.y, doorW, wallThickness);
+        batch.draw(Resources.pixelTexture,
+            house.getDoorX(), hp.y, House.DOOR_WIDTH, wallThickness);
 
         // Four storage chests along the back wall, one per ore variant.
         // Chest body is tinted to match the ore color, the ore sprite sits on
-        // top, and the deposited count is drawn above each chest.
+        // top, and a row of 10 progress pips above the chest lights up as ore
+        // is deposited — when all ten light, the matching robot part unlocks.
         int n = STORAGE_COLORS.length;
         float chestW = 26f;
         float chestH = 18f;
         float chestPad = (hs.x - n * chestW) / (n + 1);
         float chestY = hp.y + hs.y - wallThickness - chestH - 12f;
+
+        final int pipCount = UpgradeSystem.UNLOCK_THRESHOLD;
+        final float pipW = 2f;
+        final float pipH = 4f;
+        final float pipGap = 1f;
+        final float pipsTotalW = pipCount * pipW + (pipCount - 1) * pipGap;
+        final Color pipUnlit = new Color(0.18f, 0.18f, 0.18f, 1f);
 
         for (int i = 0; i < n; i++) {
             float chestX = hp.x + chestPad + i * (chestW + chestPad);
@@ -1077,19 +987,24 @@ public class GameScreen implements Screen {
             float oreY = chestY + (chestH - oreSize) * 0.5f;
             batch.draw(Resources.oreRegions[i], oreX, oreY, oreSize, oreSize);
 
-            // Count above the chest. BitmapFont.draw places text by its baseline
-            // so we offset upward by the (scaled) line height.
-            String text = String.valueOf(storageCounts[i]);
-            float textWidth = text.length() * 3.5f; // rough advance for scaled lsans-15
-            Resources.font.draw(batch, text,
-                chestX + (chestW - textWidth) * 0.5f,
-                chestY + chestH + 10f);
+            // Progress pips above the chest.
+            float pipsStartX = chestX + (chestW - pipsTotalW) * 0.5f;
+            float pipsY = chestY + chestH + 3f;
+            for (int p = 0; p < pipCount; p++) {
+                batch.setColor(p < storageCounts[i] ? STORAGE_COLORS[i] : pipUnlit);
+                batch.draw(Resources.pixelTexture,
+                    pipsStartX + p * (pipW + pipGap), pipsY, pipW, pipH);
+            }
         }
+        batch.setColor(Color.WHITE);
 
-        // Upgrade machine — purely visual here; click detection lives in
-        // handleClicks() using the same machineX/machineY world coords.
+        // Upgrade machine — decorative prop on the left wall.
         batch.setColor(Color.WHITE);
         batch.draw(Resources.upgradeMachineRegion, machineX, machineY, MACHINE_W, MACHINE_H);
+
+        // Broken/working robot in the middle of the floor. Drawn here (not via
+        // entityManager) so it stays hidden from the outside view.
+        brokenRobot.render(batch);
 
         batch.setColor(Color.WHITE);
         player.render(batch);
@@ -1102,22 +1017,44 @@ public class GameScreen implements Screen {
             player.recharge(delta);
 
             if (!trail.isEmpty()) {
-                int deposited = 0;
                 for (Resource r : trail) {
                     int v = r.getVariant();
                     if (v >= 0 && v < storageCounts.length) {
-                        storageCounts[v]++;
+                        // Cap at the unlock threshold so the chest progress bar
+                        // never overshoots and excess ore is silently discarded.
+                        if (storageCounts[v] < UpgradeSystem.UNLOCK_THRESHOLD) {
+                            storageCounts[v]++;
+                        }
                     }
                     entityManager.removeEntity(r);
-                    deposited++;
                 }
                 trail.clear();
                 Resources.powerUpSound.play();
                 player.heal(delta * 20); // Healing when at house
-                totalDeposits += deposited;
-                if (boss == null && totalDeposits >= BOSS_DEPOSIT_THRESHOLD) {
-                    spawnBoss();
-                }
+                checkPartUnlocks();
+            }
+        }
+    }
+
+    /**
+     * After a deposit, see if any chest just crossed UNLOCK_THRESHOLD and bring
+     * the matching part online. The final unlock triggers the boss arc.
+     */
+    private void checkPartUnlocks() {
+        boolean anyUnlocked = false;
+        for (Upgrade u : Upgrade.values()) {
+            if (!upgradeSystem.isUnlocked(u)
+                && storageCounts[u.oreVariant] >= UpgradeSystem.UNLOCK_THRESHOLD) {
+                upgradeSystem.unlock(u, player);
+                anyUnlocked = true;
+            }
+        }
+        if (anyUnlocked) {
+            syncPlayerParts();
+            Resources.powerUpSound.play();
+            if (boss == null && upgradeSystem.allUnlocked()) {
+                brokenRobot.setRepaired();
+                spawnBoss();
             }
         }
     }

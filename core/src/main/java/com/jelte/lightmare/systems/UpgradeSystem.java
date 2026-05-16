@@ -4,58 +4,68 @@ import com.jelte.lightmare.entities.Player;
 import com.jelte.lightmare.entities.Resource;
 
 /**
- * Tracks the four player upgrades and applies their effects on purchase.
+ * Single-step unlock per robot part. Each part takes one ore variant; reach
+ * UNLOCK_THRESHOLD of that color in storage and the part comes online with
+ * its full effect applied — no levels, no in-house purchase step.
  *
- * Each upgrade is paid in a single ore variant matching its chest's color, so
- * the link between "this ore type" and "this stat" is obvious without text:
- *   BATTERY ← blue   SPEED ← green   MINING ← orange   LIGHT ← purple
+ *   HEADLIGHT ← blue   LEGS ← green   DRILL ← orange   GUN ← purple
  */
 public class UpgradeSystem {
     public enum Upgrade {
-        BATTERY(0),
-        SPEED(1),
-        MINING(2),
-        LIGHT(3);
+        HEADLIGHT(0),
+        LEGS(1),
+        DRILL(2),
+        GUN(3);
         /** Index into Resources.oreRegions / storage chests (0=blue..3=purple). */
         public final int oreVariant;
         Upgrade(int oreVariant) { this.oreVariant = oreVariant; }
     }
 
-    public static final int MAX_LEVEL = 4;
-    public static final int COST_PER_LEVEL = 3;
+    /** Ore count of a single color needed to unlock its corresponding part. */
+    public static final int UNLOCK_THRESHOLD = 10;
 
-    private final int[] levels = new int[Upgrade.values().length];
+    private final boolean[] unlocked = new boolean[Upgrade.values().length];
 
-    public int getLevel(Upgrade u) { return levels[u.ordinal()]; }
-    public boolean isMaxed(Upgrade u) { return levels[u.ordinal()] >= MAX_LEVEL; }
+    public boolean isUnlocked(Upgrade u) { return unlocked[u.ordinal()]; }
 
-    public boolean canAfford(Upgrade u, int[] storage) {
-        if (isMaxed(u)) return false;
-        return storage[u.oreVariant] >= COST_PER_LEVEL;
+    /** True when every part is unlocked — gates the boss arc. */
+    public boolean allUnlocked() {
+        for (Upgrade u : Upgrade.values()) {
+            if (!isUnlocked(u)) return false;
+        }
+        return true;
     }
 
-    public boolean purchase(Upgrade u, int[] storage, Player player) {
-        if (!canAfford(u, storage)) return false;
-        storage[u.oreVariant] -= COST_PER_LEVEL;
-        levels[u.ordinal()]++;
+    /** True when the gun is online — gates click-to-shoot. */
+    public boolean gunReady() { return isUnlocked(Upgrade.GUN); }
+
+    public boolean canUnlock(Upgrade u, int[] storage) {
+        if (isUnlocked(u)) return false;
+        return storage[u.oreVariant] >= UNLOCK_THRESHOLD;
+    }
+
+    /** @return true if this call flipped the part from locked to unlocked. */
+    public boolean unlock(Upgrade u, Player player) {
+        if (isUnlocked(u)) return false;
+        unlocked[u.ordinal()] = true;
         applyEffect(u, player);
         return true;
     }
 
     private void applyEffect(Upgrade u, Player p) {
         switch (u) {
-            case BATTERY:
-                p.setMaxBattery(p.getMaxBattery() + 20f);
+            case HEADLIGHT:
+                p.setMaxLightRadius(p.getMaxLightRadius() + 120f);
                 break;
-            case SPEED:
-                p.setSpeed(p.getSpeed() + 20f);
+            case LEGS:
+                p.setSpeed(p.getSpeed() + 80f);
                 break;
-            case MINING:
-                // Each level shaves one click off the required mining hits, capped at 1.
-                Resource.setGlobalClicksRequired(3 - levels[u.ordinal()]);
+            case DRILL:
+                // One-click mining once the drill is online.
+                Resource.setGlobalClicksRequired(1);
                 break;
-            case LIGHT:
-                p.setMaxLightRadius(p.getMaxLightRadius() + 30f);
+            case GUN:
+                // Stat-free gate — see gunReady().
                 break;
         }
     }

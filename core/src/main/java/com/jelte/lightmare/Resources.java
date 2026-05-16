@@ -13,8 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Resources {
-    // Programmatic placeholders that are still used (house tint, UI bits).
-    public static Texture houseTexture;
+    // Programmatic placeholders still used as UI bits.
     public static Texture pixelTexture;
     public static Texture arrowTexture;
     public static Texture restartTexture;
@@ -28,11 +27,14 @@ public class Resources {
     public static TextureRegion skullguyRegion;
     public static TextureRegion upgradeMachineRegion;
 
-    // Programmatic stat icons for the upgrade panel.
-    public static Texture iconBattery;
-    public static Texture iconSpeed;
-    public static Texture iconMining;
-    public static Texture iconLight;
+    // House + robot sprites, loaded as standalone textures so the atlas does
+    // not need to be repacked for these additions.
+    public static Texture houseTexture;
+    public static Texture brokenRobotTexture;
+    public static Texture workingRobotTexture;
+    public static Texture robotLegsTexture;
+    public static Texture robotDrillTexture;
+    public static Texture robotWeaponTexture;
 
     // Boss placeholders — programmatic until real art lands.
     public static Texture bossShellTexture;
@@ -50,6 +52,8 @@ public class Resources {
     // Audio
     public static Sound mineSound;
     public static Sound powerUpSound;
+    public static Sound gunshotSound;
+    public static Sound robotwalkSound;
     public static Music[] musicTracks;
     private static final String MUSIC_DIR = "audio/music/";
 
@@ -57,7 +61,6 @@ public class Resources {
     public static BitmapFont font;
 
     public static void load() {
-        houseTexture = createColoredTexture(48, 48, Color.BROWN);
         pixelTexture = createColoredTexture(1, 1, Color.WHITE);
         arrowTexture = createArrowTexture(64, 64, Color.WHITE); // Higher res
         restartTexture = createRestartTexture(128, 128, Color.WHITE); // Higher res
@@ -75,10 +78,12 @@ public class Resources {
         skullguyRegion = atlas.findRegion("skullguy");
         upgradeMachineRegion = atlas.findRegion("upgrademachine");
 
-        iconBattery = createBatteryIcon(32, 32);
-        iconSpeed = createSpeedIcon(32, 32);
-        iconMining = createMiningIcon(32, 32);
-        iconLight = createLightIcon(32, 32);
+        houseTexture = loadPixelTexture("sprites/items/house.png");
+        brokenRobotTexture = loadPixelTexture("sprites/items/brokenRobot.png");
+        workingRobotTexture = loadPixelTexture("sprites/items/workingRobot.png");
+        robotLegsTexture = loadPixelTexture("sprites/items/robotLegs.png");
+        robotDrillTexture = loadPixelTexture("sprites/items/robotDrill.png");
+        robotWeaponTexture = loadPixelTexture("sprites/items/robotWeapon.png");
 
         bossShellTexture = createBossShellPlaceholder(64, 64);
         bossCuteTexture = createBossCutePlaceholder(32, 32);
@@ -94,6 +99,8 @@ public class Resources {
 
         mineSound = Gdx.audio.newSound(Gdx.files.internal("audio/mine.wav"));
         powerUpSound = Gdx.audio.newSound(Gdx.files.internal("audio/powerUp.wav"));
+        gunshotSound = Gdx.audio.newSound(Gdx.files.internal("audio/gunshot.wav"));
+        robotwalkSound = Gdx.audio.newSound(Gdx.files.internal("audio/robotwalk.wav"));
 
         musicTracks = loadMusicTracks();
 
@@ -124,87 +131,9 @@ public class Resources {
         return tracks.toArray(new Music[0]);
     }
 
-    private static Texture createBatteryIcon(int w, int h) {
-        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
-        p.setColor(0, 0, 0, 0); p.fill();
-        p.setColor(Color.WHITE);
-        int bw = 22, bh = 14;
-        int bx = (w - bw - 4) / 2;
-        int by = (h - bh) / 2;
-        // Battery body outline (drawn 2x for a 2px-thick frame).
-        p.drawRectangle(bx, by, bw, bh);
-        p.drawRectangle(bx + 1, by + 1, bw - 2, bh - 2);
-        // Positive tip nub.
-        p.fillRectangle(bx + bw, by + 4, 3, bh - 8);
-        // Three filled cells inside.
-        p.fillRectangle(bx + 3, by + 3, 5, bh - 6);
-        p.fillRectangle(bx + 9, by + 3, 5, bh - 6);
-        p.fillRectangle(bx + 15, by + 3, 4, bh - 6);
-        Texture t = new Texture(p);
-        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
-        p.dispose();
-        return t;
-    }
-
-    private static Texture createSpeedIcon(int w, int h) {
-        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
-        p.setColor(0, 0, 0, 0); p.fill();
-        p.setColor(Color.WHITE);
-        int cy = h / 2;
-        int cx = w / 2 - 4;
-        // Three right-pointing chevrons spaced horizontally.
-        for (int i = -1; i <= 1; i++) {
-            int ox = i * 7;
-            p.fillTriangle(cx + ox - 4, cy - 9, cx + ox - 4, cy + 9, cx + ox + 4, cy);
-            p.setColor(0, 0, 0, 0);
-            p.fillTriangle(cx + ox - 6, cy - 5, cx + ox - 6, cy + 5, cx + ox + 0, cy);
-            p.setColor(Color.WHITE);
-        }
-        Texture t = new Texture(p);
-        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
-        p.dispose();
-        return t;
-    }
-
-    private static Texture createMiningIcon(int w, int h) {
-        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
-        p.setColor(0, 0, 0, 0); p.fill();
-        p.setColor(Color.WHITE);
-        // Pickaxe head — a horizontal bar at the top, tapering on the ends.
-        int headY = 6;
-        p.fillTriangle(2, headY + 5, 14, headY + 5, 2, headY - 1);
-        p.fillTriangle(w - 2, headY + 5, w - 14, headY + 5, w - 2, headY - 1);
-        p.fillRectangle(4, headY, w - 8, 4);
-        // Handle running from head center to bottom-right.
-        for (int i = -1; i <= 1; i++) {
-            p.drawLine(w / 2 + i, headY + 4, w - 6 + i, h - 4);
-        }
-        Texture t = new Texture(p);
-        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
-        p.dispose();
-        return t;
-    }
-
-    private static Texture createLightIcon(int w, int h) {
-        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
-        p.setColor(0, 0, 0, 0); p.fill();
-        p.setColor(Color.WHITE);
-        int cx = w / 2, cy = h / 2;
-        // Sun body + 8 surrounding rays.
-        p.fillCircle(cx, cy, 6);
-        for (int i = 0; i < 8; i++) {
-            double ang = i * Math.PI / 4;
-            int x1 = (int) Math.round(cx + Math.cos(ang) * 10);
-            int y1 = (int) Math.round(cy + Math.sin(ang) * 10);
-            int x2 = (int) Math.round(cx + Math.cos(ang) * 14);
-            int y2 = (int) Math.round(cy + Math.sin(ang) * 14);
-            p.drawLine(x1, y1, x2, y2);
-            p.drawLine(x1 + 1, y1, x2 + 1, y2);
-            p.drawLine(x1, y1 + 1, x2, y2 + 1);
-        }
-        Texture t = new Texture(p);
-        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
-        p.dispose();
+    private static Texture loadPixelTexture(String path) {
+        Texture t = new Texture(Gdx.files.internal(path));
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         return t;
     }
 
@@ -418,7 +347,6 @@ public class Resources {
     }
 
     public static void dispose() {
-        houseTexture.dispose();
         pixelTexture.dispose();
         arrowTexture.dispose();
         restartTexture.dispose();
@@ -426,15 +354,19 @@ public class Resources {
         if (font != null) font.dispose();
         if (mineSound != null) mineSound.dispose();
         if (powerUpSound != null) powerUpSound.dispose();
+        if (gunshotSound != null) gunshotSound.dispose();
+        if (robotwalkSound != null) robotwalkSound.dispose();
         if (musicTracks != null) {
             for (Music m : musicTracks) {
                 if (m != null) m.dispose();
             }
         }
-        if (iconBattery != null) iconBattery.dispose();
-        if (iconSpeed != null) iconSpeed.dispose();
-        if (iconMining != null) iconMining.dispose();
-        if (iconLight != null) iconLight.dispose();
+        if (houseTexture != null) houseTexture.dispose();
+        if (brokenRobotTexture != null) brokenRobotTexture.dispose();
+        if (workingRobotTexture != null) workingRobotTexture.dispose();
+        if (robotLegsTexture != null) robotLegsTexture.dispose();
+        if (robotDrillTexture != null) robotDrillTexture.dispose();
+        if (robotWeaponTexture != null) robotWeaponTexture.dispose();
         if (bossShellTexture != null) bossShellTexture.dispose();
         if (bossCuteTexture != null) bossCuteTexture.dispose();
         if (starsTexture != null) starsTexture.dispose();
