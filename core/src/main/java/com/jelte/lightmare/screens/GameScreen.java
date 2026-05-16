@@ -239,10 +239,10 @@ public class GameScreen implements Screen {
         brokenRobot = new BrokenRobot(robotX, robotY,
             Resources.brokenRobotTexture, Resources.workingRobotTexture);
 
-        // Add lights
-        // Monochrome lights — color is white, alpha controls relative strength
-        // so the composite dither operates on a single brightness channel.
-        houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), house.getLightRadius(), house.getCenterX(), house.getCenterY());
+        // Add lights — monochrome (color white, alpha = strength) so the dither
+        // composite operates on a single brightness channel. The house has no
+        // PointLight; see the LIGHT PASS where a fully-bright rectangle is
+        // painted at its footprint.
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
 
@@ -475,6 +475,20 @@ public class GameScreen implements Screen {
         lightFbo.begin();
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0f, 0f, 0f, 1f);
+
+        // Paint a solid white rectangle covering the house's footprint before
+        // rayHandler runs. Result: the interior is uniformly fully lit (no
+        // circular falloff in the corners) and from outside the house reads as
+        // a sharp rectangle of light matching the sprite's silhouette.
+        // rayHandler adds the player's circular light additively on top of this.
+        batch.setProjectionMatrix(camera.combined);
+        batch.begin();
+        batch.setColor(Color.WHITE);
+        batch.draw(Resources.pixelTexture,
+            house.getPosition().x, house.getPosition().y,
+            house.getSize().x, house.getSize().y);
+        batch.end();
+
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
         lightFbo.end();
