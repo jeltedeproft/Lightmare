@@ -3,15 +3,18 @@ package com.jelte.lightmare.entities;
 import com.badlogic.gdx.graphics.Texture;
 
 public class House extends Entity {
-    public static final float WIDTH = 192f;
-    public static final float HEIGHT = 128f;
+    // 2× the source sprite (87x82) — preserves its native aspect ratio so the
+    // pixel art doesn't stretch, while staying large enough for the interior
+    // chest/machine/robot layout.
+    public static final float WIDTH = 174f;
+    public static final float HEIGHT = 164f;
     public static final float WALL_THICKNESS = 8f;
     public static final float DOOR_WIDTH = 32f;
 
     // X offset of the door's left edge from the house's left edge — tuned to
-    // sit under the small side door on the right of house.png. Eyeballed
-    // in-game; bump this if the collision opening drifts off the sprite door.
-    public static final float DOOR_X_OFFSET = 132f;
+    // sit under the small side door on the right of house.png (sprite x≈67 at
+    // 1× → x≈135 at 2×, minus half of DOOR_WIDTH).
+    public static final float DOOR_X_OFFSET = 119f;
 
     private float lightRadius = 240f;
 
