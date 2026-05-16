@@ -54,7 +54,7 @@ public class Bullet extends Entity {
     @Override
     public void render(SpriteBatch batch) {
         if (spent) return;
-        batch.setColor(1f, 0.95f, 0.6f, 1f);
+        batch.setColor(1f, 0.2f, 0.15f, 1f);
         batch.draw(Resources.pixelTexture, position.x, position.y, size.x, size.y);
         batch.setColor(Color.WHITE);
     }

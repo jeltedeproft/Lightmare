@@ -46,7 +46,9 @@ import com.jelte.lightmare.systems.ResourceSystem;
 import com.jelte.lightmare.systems.UpgradeSystem;
 import com.jelte.lightmare.systems.UpgradeSystem.Upgrade;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class GameScreen implements Screen {
     /**
@@ -140,6 +142,12 @@ public class GameScreen implements Screen {
     // rectangle directly into the light FBO each frame, which matches its
     // silhouette from outside and keeps the interior uniformly bright.
 
+    // Per-bullet PointLights (small red tracer glow). Created in fireBullet,
+    // position-synced each frame in updateBullets, removed when the bullet
+    // despawns. IdentityHashMap so bullet identity is what keys the map even
+    // if Bullet ever gains value-based equality later.
+    private final Map<Bullet, PointLight> bulletLights = new IdentityHashMap<>();
+
     // Pixel-art render targets. The world is drawn at full brightness into
     // gameFbo. Lights (with the dither shader) are drawn additively into a
     // separate lightFbo cleared to black, producing a "light intensity mask".
@@ -150,6 +158,10 @@ public class GameScreen implements Screen {
     private TextureRegion fboRegion;
     private TextureRegion lightFboRegion;
     private ShaderProgram ditherShader;
+    // Custom shader for the house's rectangular dithered light.
+    private ShaderProgram houseLightShader;
+    /** Pixels by which the house's light glow extends beyond its bounds. */
+    private static final float HOUSE_LIGHT_PADDING = 48f;
 
     // Tiled background
     private TiledMap tiledMap;
@@ -179,6 +191,7 @@ public class GameScreen implements Screen {
         lightFboRegion.flip(false, true);
 
         ditherShader = Shaders.createDitherShader();
+        houseLightShader = Shaders.createHouseRectShader();
 
         // Tiled background. Force nearest filter on the tileset so it stays
         // crisp through the FBO upscale (the default is Linear, which would
@@ -476,18 +489,27 @@ public class GameScreen implements Screen {
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0f, 0f, 0f, 1f);
 
-        // Paint a solid white rectangle covering the house's footprint before
-        // rayHandler runs. Result: the interior is uniformly fully lit (no
-        // circular falloff in the corners) and from outside the house reads as
-        // a sharp rectangle of light matching the sprite's silhouette.
-        // rayHandler adds the player's circular light additively on top of this.
+        // Paint the house's footprint into the light FBO via a custom shader
+        // that mimics the PointLight's 3-ring dither, but with rectangular
+        // bands hugging the house outline. Inside: brightness 1.0 (fully lit
+        // interior). Just outside: dithered middle/outer rings extending
+        // HOUSE_LIGHT_PADDING pixels in every direction.
+        float pad = HOUSE_LIGHT_PADDING;
+        float quadX = house.getPosition().x - pad;
+        float quadY = house.getPosition().y - pad;
+        float quadW = house.getSize().x + 2f * pad;
+        float quadH = house.getSize().y + 2f * pad;
+
+        batch.setShader(houseLightShader);
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
+        houseLightShader.setUniformf("u_padding", pad);
+        houseLightShader.setUniformf("u_innerSize", house.getSize().x, house.getSize().y);
+        houseLightShader.setUniformf("u_quadSize", quadW, quadH);
         batch.setColor(Color.WHITE);
-        batch.draw(Resources.pixelTexture,
-            house.getPosition().x, house.getPosition().y,
-            house.getSize().x, house.getSize().y);
+        batch.draw(Resources.pixelTexture, quadX, quadY, quadW, quadH);
         batch.end();
+        batch.setShader(null);
 
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
@@ -620,7 +642,14 @@ public class GameScreen implements Screen {
         // from the body rather than the corner of the AABB.
         float ox = player.getPosition().x + 8f;
         float oy = player.getPosition().y + 8f;
-        entityManager.addEntity(new Bullet(ox, oy, targetX - ox, targetY - oy));
+        Bullet bullet = new Bullet(ox, oy, targetX - ox, targetY - oy);
+        entityManager.addEntity(bullet);
+        // Small red tracer glow that follows the bullet — short range, fewer
+        // rays than the player light since the glow only needs to read as a
+        // moving red dot in the dark.
+        PointLight light = new PointLight(rayHandler, 24,
+            new Color(1f, 0.25f, 0.15f, 0.9f), 32f, ox, oy);
+        bulletLights.put(bullet, light);
         Resources.gunshotSound.play();
     }
 
@@ -631,6 +660,13 @@ public class GameScreen implements Screen {
         for (Entity e : entityManager.getEntities()) {
             if (!(e instanceof Bullet)) continue;
             Bullet b = (Bullet) e;
+
+            // Keep the tracer light glued to the bullet's center each frame.
+            PointLight light = bulletLights.get(b);
+            if (light != null) {
+                light.setPosition(b.getPosition().x + 1.5f, b.getPosition().y + 1.5f);
+            }
+
             if (b.isSpent()) {
                 if (toRemove == null) toRemove = new ArrayList<>();
                 toRemove.add(b);
@@ -663,7 +699,14 @@ public class GameScreen implements Screen {
             }
         }
         if (toRemove != null) {
-            for (Entity e : toRemove) entityManager.removeEntity(e);
+            for (Entity e : toRemove) {
+                entityManager.removeEntity(e);
+                // Free the box2dlight slot so dead bullets don't pile up lights.
+                if (e instanceof Bullet) {
+                    PointLight light = bulletLights.remove(e);
+                    if (light != null) light.remove();
+                }
+            }
         }
     }
 
@@ -1133,6 +1176,7 @@ public class GameScreen implements Screen {
         gameFbo.dispose();
         lightFbo.dispose();
         ditherShader.dispose();
+        houseLightShader.dispose();
         mapRenderer.dispose();
         tiledMap.dispose();
     }
