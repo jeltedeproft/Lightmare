@@ -1404,11 +1404,28 @@ public class GameScreen implements Screen {
         batch.setColor(0.28f, 0.18f, 0.08f, 1f);
         batch.draw(Resources.pixelTexture, hp.x, hp.y, hs.x, hs.y);
 
-        // Floor — lighter, inset by wallThickness on all sides.
-        batch.setColor(0.55f, 0.4f, 0.22f, 1f);
-        batch.draw(Resources.pixelTexture,
-            hp.x + wallThickness, hp.y + wallThickness,
-            hs.x - 2f * wallThickness, hs.y - 2f * wallThickness);
+        // Floor — tile the 16x16 floorboard sprite across the interior. Edge
+        // tiles get scissor-clipped via the source-rect overload so the last
+        // column/row at the wall doesn't bleed past the inset rectangle.
+        batch.setColor(Color.WHITE);
+        final float TILE = 16f;
+        float floorX = hp.x + wallThickness;
+        float floorY = hp.y + wallThickness;
+        float floorW = hs.x - 2f * wallThickness;
+        float floorH = hs.y - 2f * wallThickness;
+        TextureRegion tile = Resources.floorboardRegion;
+        for (float ty = 0; ty < floorH; ty += TILE) {
+            for (float tx = 0; tx < floorW; tx += TILE) {
+                float w = Math.min(TILE, floorW - tx);
+                float h = Math.min(TILE, floorH - ty);
+                int srcW = (int) ((w / TILE) * tile.getRegionWidth());
+                int srcH = (int) ((h / TILE) * tile.getRegionHeight());
+                batch.draw(tile.getTexture(),
+                    floorX + tx, floorY + ty, w, h,
+                    tile.getRegionX(), tile.getRegionY(), srcW, srcH,
+                    false, false);
+            }
+        }
 
         // Door + garage gaps in the south wall — uses the same House getters
         // as the collision logic so the visible thresholds line up with each

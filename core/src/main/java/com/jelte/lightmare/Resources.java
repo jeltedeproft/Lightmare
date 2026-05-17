@@ -25,6 +25,8 @@ public class Resources {
     public static TextureRegion playerLeft;
     public static TextureRegion playerRight;
     public static TextureRegion skullguyRegion;
+    /** 16x16 floor tile drawn across the inside of the house. */
+    public static TextureRegion floorboardRegion;
     /** Animation frames for the torch sprite (torch_1/_2/_3 in the atlas). */
     public static TextureRegion[] torchFrames;
 
@@ -93,6 +95,7 @@ public class Resources {
         playerLeft = atlas.findRegion("lilguyLeft");
         playerRight = atlas.findRegion("lilguyRight");
         skullguyRegion = atlas.findRegion("skullguy");
+        floorboardRegion = atlas.findRegion("floorboard");
         // TexturePacker strips the "_1/_2/_3" suffix and stores them indexed
         // under "torch"; findRegions returns them sorted by that index.
         com.badlogic.gdx.utils.Array<TextureAtlas.AtlasRegion> torchRegs = atlas.findRegions("torch");
