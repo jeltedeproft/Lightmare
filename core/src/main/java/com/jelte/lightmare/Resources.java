@@ -25,7 +25,6 @@ public class Resources {
     public static TextureRegion playerLeft;
     public static TextureRegion playerRight;
     public static TextureRegion skullguyRegion;
-    public static TextureRegion upgradeMachineRegion;
 
     // House + robot sprites, loaded as standalone textures so the atlas does
     // not need to be repacked for these additions.
@@ -35,6 +34,13 @@ public class Resources {
     public static Texture robotLegsTexture;
     public static Texture robotDrillTexture;
     public static Texture robotWeaponTexture;
+
+    // Combination sprites for the broken mech, indexed by which parts are
+    // attached. Any slot may be null if the artist hasn't drawn it yet;
+    // BrokenRobot falls back to the plain brokenRobot sprite in that case.
+    //   index = (legs?1:0)<<2 | (drill?1:0)<<1 | (weapon?1:0)
+    //   0=none, 1=W, 2=D, 3=DW, 4=L, 5=LW, 6=LD, 7=all (=workingRobot)
+    public static Texture[] mechCombinationTextures = new Texture[8];
 
     // Boss placeholders — programmatic until real art lands.
     public static Texture bossShellTexture;
@@ -76,7 +82,6 @@ public class Resources {
         playerLeft = atlas.findRegion("lilguyLeft");
         playerRight = atlas.findRegion("lilguyRight");
         skullguyRegion = atlas.findRegion("skullguy");
-        upgradeMachineRegion = atlas.findRegion("upgrademachine");
 
         houseTexture = loadPixelTexture("sprites/items/house.png");
         brokenRobotTexture = loadPixelTexture("sprites/items/brokenRobot.png");
@@ -84,6 +89,18 @@ public class Resources {
         robotLegsTexture = loadPixelTexture("sprites/items/robotLegs.png");
         robotDrillTexture = loadPixelTexture("sprites/items/robotDrill.png");
         robotWeaponTexture = loadPixelTexture("sprites/items/robotWeapon.png");
+
+        // Mech combination art — anchors are brokenRobot (all 0) and
+        // workingRobot (all 1); the six in-between sprites are optional and
+        // fall back to brokenRobot if absent.
+        mechCombinationTextures[0] = brokenRobotTexture;
+        mechCombinationTextures[1] = loadPixelTextureOrNull("sprites/items/brokenRobot_W.png");
+        mechCombinationTextures[2] = loadPixelTextureOrNull("sprites/items/brokenRobot_D.png");
+        mechCombinationTextures[3] = loadPixelTextureOrNull("sprites/items/brokenRobot_DW.png");
+        mechCombinationTextures[4] = loadPixelTextureOrNull("sprites/items/brokenRobot_L.png");
+        mechCombinationTextures[5] = loadPixelTextureOrNull("sprites/items/brokenRobot_LW.png");
+        mechCombinationTextures[6] = loadPixelTextureOrNull("sprites/items/brokenRobot_LD.png");
+        mechCombinationTextures[7] = workingRobotTexture;
 
         bossShellTexture = createBossShellPlaceholder(64, 64);
         bossCuteTexture = createBossCutePlaceholder(32, 32);
@@ -135,6 +152,13 @@ public class Resources {
         Texture t = new Texture(Gdx.files.internal(path));
         t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         return t;
+    }
+
+    /** Like loadPixelTexture but returns null if the file is missing, so the
+     *  caller can substitute a fallback instead of crashing on startup. */
+    private static Texture loadPixelTextureOrNull(String path) {
+        if (!Gdx.files.internal(path).exists()) return null;
+        return loadPixelTexture(path);
     }
 
     private static Texture createBossShellPlaceholder(int w, int h) {
@@ -362,6 +386,11 @@ public class Resources {
             }
         }
         if (houseTexture != null) houseTexture.dispose();
+        // Slots 0 and 7 alias brokenRobotTexture/workingRobotTexture — dispose
+        // only the in-between slots here, then dispose the anchors below.
+        for (int i = 1; i < 7; i++) {
+            if (mechCombinationTextures[i] != null) mechCombinationTextures[i].dispose();
+        }
         if (brokenRobotTexture != null) brokenRobotTexture.dispose();
         if (workingRobotTexture != null) workingRobotTexture.dispose();
         if (robotLegsTexture != null) robotLegsTexture.dispose();

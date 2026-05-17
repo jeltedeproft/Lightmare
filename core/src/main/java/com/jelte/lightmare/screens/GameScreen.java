@@ -97,13 +97,6 @@ public class GameScreen implements Screen {
     private UpgradeSystem upgradeSystem;
     private PlayerController playerController;
 
-    // Upgrade machine — kept as a decorative prop on the left wall inside the
-    // house. Unlocks are now triggered automatically when a chest hits the ore
-    // threshold, so the machine no longer has a click handler attached.
-    private static final float MACHINE_W = 32f;
-    private static final float MACHINE_H = 32f;
-    private float machineX, machineY;
-
     // Juice
     private static final float SHAKE_DURATION = 0.2f;
     private float shakeIntensity = 0f;
@@ -112,10 +105,25 @@ public class GameScreen implements Screen {
     private float flickerTimer = 0f;
 
     // Robot footsteps — play robotwalk.wav on a fixed cadence whenever the
-    // player is moving and the legs upgrade has been bought (lilguy's bare feet
-    // stay silent).
+    // active mech is walking. The lilguy player is human; only the mech makes
+    // these mechanical footstep sounds.
     private static final float FOOTSTEP_INTERVAL = 0.35f;
     private float footstepCooldown = 0f;
+
+    // Active mech AI tuning. Ranges expand when VISION is unlocked so the
+    // upgrade has a tangible effect on how aggressively the mech reaches out.
+    private static final float MECH_SPEED = 80f;
+    private static final float MECH_FIRE_RANGE_BASE = 100f;
+    private static final float MECH_FIRE_RANGE_BOOSTED = 180f;
+    private static final float MECH_MINE_RANGE_BASE = 80f;
+    private static final float MECH_MINE_RANGE_BOOSTED = 140f;
+    private static final float MECH_FIRE_COOLDOWN = 1.0f;
+    private static final float MECH_MINE_DISTANCE = 28f;
+    private static final float MECH_WANDER_REPICK = 3f;
+    private float mechFireTimer = 0f;
+    private float mechWanderTimer = 0f;
+    private final Vector2 mechWanderTarget = new Vector2();
+    private Resource mechMiningTarget;
 
     // House interior state
     private boolean playerInside = false;
@@ -139,6 +147,7 @@ public class GameScreen implements Screen {
     private PointLight playerLight;
     private PointLight emergencyLight;
     private PointLight houseLight;
+    private PointLight mechLight;
 
     // Per-bullet PointLights (small red tracer glow). Created in fireBullet,
     // position-synced each frame in updateBullets, removed when the bullet
@@ -234,16 +243,14 @@ public class GameScreen implements Screen {
         entityManager.addEntity(house);
         entityManager.addEntity(player);
 
-        // Story prop: a broken robot slumped on the floor inside the house —
-        // placed between the upgrade machine (left wall) and the door (right
-        // side) so the player sees it immediately on spawning. Drawn manually
-        // by renderInsideView (not via entityManager) so it doesn't bleed
-        // through the house sprite when the player is outside. Sprite swaps
-        // to the "working" robot once every part has been repaired.
-        float robotX = house.getPosition().x + 100f;
-        float robotY = house.getPosition().y + 24f;
-        brokenRobot = new BrokenRobot(robotX, robotY,
-            Resources.brokenRobotTexture, Resources.workingRobotTexture);
+        // Story prop: the broken mech parked against the left wall, where the
+        // upgrade machine used to sit. Drawn manually by renderInsideView so
+        // it doesn't bleed through the house sprite from outside. Sprite
+        // updates as parts are bolted on; on activation it relocates south of
+        // the garage and joins entityManager for the outside render.
+        float robotX = house.getPosition().x + 12f;
+        float robotY = house.getPosition().y + 36f;
+        brokenRobot = new BrokenRobot(robotX, robotY);
 
         // Add lights — monochrome (color white, alpha = strength) so the dither
         // composite operates on a single brightness channel.
@@ -263,10 +270,6 @@ public class GameScreen implements Screen {
         // across a game-over restart, leaving rocks easier than intended.
         Resource.setGlobalClicksRequired(3);
 
-        // Upgrade machine sits along the left wall, vertically centered, so
-        // the back-wall chests and the south-wall door stay clear.
-        machineX = house.getPosition().x + 24f;
-        machineY = house.getPosition().y + (House.HEIGHT - MACHINE_H) * 0.5f;
         // Music start is deferred to render() — browsers (and HTML5/GWT in
         // particular) block audio playback until the user has interacted with
         // the page, so calling play() from the constructor throws NotAllowedError.
@@ -327,13 +330,13 @@ public class GameScreen implements Screen {
                 isBlockedByRocks(x, y, w, h)
                     || house.isBlockedByWall(x, y, w, h, true));
 
-            updateFootsteps(dx, dy, delta);
 
             entityManager.update(delta);
             monsterSystem.update(delta, player);
             resourceSystem.update(delta, player);
             particleSystem.update(delta);
             updateBullets();
+            updateMechAI(delta);
             // Boss has phase-dependent AI (chase shell, flee cute) — only active
             // once the intro pan has handed control back to the player.
             if (boss != null && state == State.PLAYING) {
@@ -481,6 +484,20 @@ public class GameScreen implements Screen {
         Gdx.gl.glViewport(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
         ScreenUtils.clear(0f, 0f, 0f, 1f);
 
+        // When the player is inside, paint the entire house footprint as solid
+        // white so the interior reads at full brightness end-to-end. The
+        // circular houseLight still fires below and provides the dithered
+        // halo outside, but inside the rectangle saturates lighting to 1.0.
+        if (showInterior) {
+            batch.setProjectionMatrix(camera.combined);
+            batch.begin();
+            batch.setColor(Color.WHITE);
+            batch.draw(Resources.pixelTexture,
+                house.getPosition().x, house.getPosition().y,
+                house.getSize().x, house.getSize().y);
+            batch.end();
+        }
+
         rayHandler.setCombinedMatrix(camera);
         rayHandler.updateAndRender();
         lightFbo.end();
@@ -537,13 +554,6 @@ public class GameScreen implements Screen {
         Vector3 worldCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
         viewport.unproject(worldCoords);
 
-        // Fire a bullet whenever the gun is fully assembled. Bullets travel
-        // through ores harmlessly, so the same click still mines or hits the
-        // boss via the checks below — shooting is purely additive once unlocked.
-        if (upgradeSystem.gunReady()) {
-            fireBullet(worldCoords.x, worldCoords.y);
-        }
-
         // Click on the boss — close-range attack like mining. After 5 hits the
         // boss is dead and we kick off the WITHER cinematic.
         if (boss != null && !boss.isDead()
@@ -587,31 +597,192 @@ public class GameScreen implements Screen {
         }
     }
 
-    private void updateFootsteps(float dx, float dy, float delta) {
-        boolean moving = dx != 0f || dy != 0f;
-        if (!moving || !player.hasLegs()) {
-            // Reset so the very next step plays without waiting for a cooldown.
+    private void syncMechParts() {
+        boolean wasActive = brokenRobot.isActive();
+        if (upgradeSystem.isUnlocked(Upgrade.LEGS))  brokenRobot.attachLegs();
+        if (upgradeSystem.isUnlocked(Upgrade.DRILL)) brokenRobot.attachDrill();
+        if (upgradeSystem.isUnlocked(Upgrade.GUN))   brokenRobot.attachWeapon();
+        if (!wasActive && brokenRobot.isActive()) {
+            onMechActivated();
+        }
+    }
+
+    /**
+     * Move the now-active mech just south of the garage opening, hand it over
+     * to entityManager so it renders during the outside pass, and give it a
+     * PointLight so the player can spot it out in the dark. From here the AI
+     * in updateMechAI takes over.
+     */
+    private void onMechActivated() {
+        float outX = house.getGarageX() + House.GARAGE_WIDTH * 0.5f - BrokenRobot.WIDTH * 0.5f;
+        float outY = house.getPosition().y - BrokenRobot.HEIGHT - 8f;
+        brokenRobot.setPosition(outX, outY);
+        entityManager.addEntity(brokenRobot);
+        // Modest circular glow so the mech is visible at night, not as bright
+        // as the player's headlight (the mech runs on internal power).
+        mechLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.7f),
+            80f, outX + BrokenRobot.WIDTH * 0.5f, outY + BrokenRobot.HEIGHT * 0.5f);
+    }
+
+    private void updateMechAI(float delta) {
+        if (!brokenRobot.isActive()) return;
+
+        mechFireTimer -= delta;
+        float fireRange = upgradeSystem.isUnlocked(Upgrade.VISION)
+            ? MECH_FIRE_RANGE_BOOSTED : MECH_FIRE_RANGE_BASE;
+        float mineRange = upgradeSystem.isUnlocked(Upgrade.VISION)
+            ? MECH_MINE_RANGE_BOOSTED : MECH_MINE_RANGE_BASE;
+
+        float prevX = brokenRobot.getPosition().x;
+        float prevY = brokenRobot.getPosition().y;
+        float cx = prevX + BrokenRobot.WIDTH * 0.5f;
+        float cy = prevY + BrokenRobot.HEIGHT * 0.5f;
+
+        Entity hostile = findNearestHostile(cx, cy, fireRange);
+        if (hostile != null) {
+            mechMiningTarget = null;
+            float hcx = hostile.getPosition().x + hostile.getSize().x * 0.5f;
+            float hcy = hostile.getPosition().y + hostile.getSize().y * 0.5f;
+            moveMechToward(hcx, hcy, delta);
+            if (mechFireTimer <= 0f) {
+                fireBullet(cx, cy, hcx, hcy);
+                mechFireTimer = MECH_FIRE_COOLDOWN;
+            }
+        } else {
+            if (mechMiningTarget == null || mechMiningTarget.isMined()) {
+                mechMiningTarget = findNearestOre(cx, cy, mineRange);
+            }
+            if (mechMiningTarget != null) {
+                float ox = mechMiningTarget.getPosition().x + mechMiningTarget.getSize().x * 0.5f;
+                float oy = mechMiningTarget.getPosition().y + mechMiningTarget.getSize().y * 0.5f;
+                float dx = ox - cx;
+                float dy = oy - cy;
+                if (dx * dx + dy * dy < MECH_MINE_DISTANCE * MECH_MINE_DISTANCE) {
+                    boolean finished = mechMiningTarget.click();
+                    Resources.mineSound.play();
+                    if (finished) {
+                        int v = mechMiningTarget.getVariant();
+                        if (v >= 0 && v < storageCounts.length
+                            && storageCounts[v] < UpgradeSystem.UNLOCK_THRESHOLD) {
+                            storageCounts[v]++;
+                        }
+                        entityManager.removeEntity(mechMiningTarget);
+                        mechMiningTarget = null;
+                        // VISION can still unlock after the mech is active —
+                        // pick it up if this deposit just crossed the threshold.
+                        checkPartUnlocks();
+                    }
+                } else {
+                    moveMechToward(ox, oy, delta);
+                }
+            } else {
+                mechWanderTimer -= delta;
+                float dxw = mechWanderTarget.x - cx;
+                float dyw = mechWanderTarget.y - cy;
+                if (mechWanderTimer <= 0f || dxw * dxw + dyw * dyw < 64f) {
+                    float angle = MathUtils.random(0f, MathUtils.PI2);
+                    float distFromHouse = MathUtils.random(80f, 180f);
+                    mechWanderTarget.set(
+                        house.getCenterX() + MathUtils.cos(angle) * distFromHouse,
+                        house.getCenterY() + MathUtils.sin(angle) * distFromHouse);
+                    mechWanderTimer = MECH_WANDER_REPICK;
+                }
+                moveMechToward(mechWanderTarget.x, mechWanderTarget.y, delta);
+            }
+        }
+
+        // Footstep audio if the mech actually translated this frame.
+        float dx = brokenRobot.getPosition().x - prevX;
+        float dy = brokenRobot.getPosition().y - prevY;
+        boolean moved = dx * dx + dy * dy > 0.01f;
+        if (moved) {
+            footstepCooldown -= delta;
+            if (footstepCooldown <= 0f) {
+                Resources.robotwalkSound.play();
+                footstepCooldown = FOOTSTEP_INTERVAL;
+            }
+        } else {
             footstepCooldown = 0f;
-            return;
         }
-        footstepCooldown -= delta;
-        if (footstepCooldown <= 0f) {
-            Resources.robotwalkSound.play();
-            footstepCooldown = FOOTSTEP_INTERVAL;
+
+        // Keep the mech light glued to the (post-move) mech center.
+        if (mechLight != null) {
+            mechLight.setPosition(
+                brokenRobot.getPosition().x + BrokenRobot.WIDTH * 0.5f,
+                brokenRobot.getPosition().y + BrokenRobot.HEIGHT * 0.5f);
         }
     }
 
-    private void syncPlayerParts() {
-        player.setHasLegs(upgradeSystem.isUnlocked(Upgrade.LEGS));
-        player.setHasDrill(upgradeSystem.isUnlocked(Upgrade.DRILL));
-        player.setHasGun(upgradeSystem.isUnlocked(Upgrade.GUN));
+    private Entity findNearestHostile(float cx, float cy, float range) {
+        Entity best = null;
+        float bestDist2 = range * range;
+        for (Entity e : entityManager.getEntities()) {
+            boolean isHostile = e instanceof Monster
+                || (e instanceof Boss && !((Boss) e).isDead());
+            if (!isHostile) continue;
+            float dx = e.getPosition().x + e.getSize().x * 0.5f - cx;
+            float dy = e.getPosition().y + e.getSize().y * 0.5f - cy;
+            float d2 = dx * dx + dy * dy;
+            if (d2 < bestDist2) {
+                best = e;
+                bestDist2 = d2;
+            }
+        }
+        return best;
     }
 
-    private void fireBullet(float targetX, float targetY) {
-        // Originate at the player's visual center so bullets read as coming
-        // from the body rather than the corner of the AABB.
-        float ox = player.getPosition().x + 8f;
-        float oy = player.getPosition().y + 8f;
+    private Resource findNearestOre(float cx, float cy, float range) {
+        Resource best = null;
+        float bestDist2 = range * range;
+        for (Entity e : entityManager.getEntities()) {
+            if (!(e instanceof Resource)) continue;
+            Resource r = (Resource) e;
+            if (r.isMined()) continue;
+            float dx = r.getPosition().x + r.getSize().x * 0.5f - cx;
+            float dy = r.getPosition().y + r.getSize().y * 0.5f - cy;
+            float d2 = dx * dx + dy * dy;
+            if (d2 < bestDist2) {
+                best = r;
+                bestDist2 = d2;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Axis-separated steer step for the mech, blocked by rocks and the full
+     * south wall (allowDoor=false) so the mech stays outside even though the
+     * garage and door are passable for the player.
+     */
+    private void moveMechToward(float tx, float ty, float delta) {
+        float px = brokenRobot.getPosition().x;
+        float py = brokenRobot.getPosition().y;
+        float w = BrokenRobot.WIDTH;
+        float h = BrokenRobot.HEIGHT;
+        float cx = px + w * 0.5f;
+        float cy = py + h * 0.5f;
+        float dx = tx - cx;
+        float dy = ty - cy;
+        float len = (float) Math.sqrt(dx * dx + dy * dy);
+        if (len < 0.01f) return;
+        dx /= len;
+        dy /= len;
+        float stepX = dx * MECH_SPEED * delta;
+        float stepY = dy * MECH_SPEED * delta;
+        float newX = px + stepX;
+        if (!isBlockedByRocks(newX, py, w, h)
+            && !house.isBlockedByWall(newX, py, w, h, false)) {
+            px = newX;
+        }
+        float newY = py + stepY;
+        if (!isBlockedByRocks(px, newY, w, h)
+            && !house.isBlockedByWall(px, newY, w, h, false)) {
+            py = newY;
+        }
+        brokenRobot.setPosition(px, py);
+    }
+
+    private void fireBullet(float ox, float oy, float targetX, float targetY) {
         Bullet bullet = new Bullet(ox, oy, targetX - ox, targetY - oy);
         entityManager.addEntity(bullet);
         // Small red tracer glow that follows the bullet — short range, fewer
@@ -1028,13 +1199,12 @@ public class GameScreen implements Screen {
         }
         batch.setColor(Color.WHITE);
 
-        // Upgrade machine — decorative prop on the left wall.
-        batch.setColor(Color.WHITE);
-        batch.draw(Resources.upgradeMachineRegion, machineX, machineY, MACHINE_W, MACHINE_H);
-
-        // Broken/working robot in the middle of the floor. Drawn here (not via
-        // entityManager) so it stays hidden from the outside view.
-        brokenRobot.render(batch);
+        // Broken mech in the middle of the floor while it's still being built.
+        // Once activated, it relocates outside and renders via entityManager
+        // instead, so we skip the manual draw here.
+        if (!brokenRobot.isActive()) {
+            brokenRobot.render(batch);
+        }
 
         batch.setColor(Color.WHITE);
         player.render(batch);
@@ -1075,15 +1245,16 @@ public class GameScreen implements Screen {
         for (Upgrade u : Upgrade.values()) {
             if (!upgradeSystem.isUnlocked(u)
                 && storageCounts[u.oreVariant] >= UpgradeSystem.UNLOCK_THRESHOLD) {
-                upgradeSystem.unlock(u, player);
+                upgradeSystem.unlock(u);
                 anyUnlocked = true;
             }
         }
         if (anyUnlocked) {
-            syncPlayerParts();
+            syncMechParts();
             Resources.powerUpSound.play();
-            if (boss == null && upgradeSystem.allUnlocked()) {
-                brokenRobot.setRepaired();
+            // Boss triggers when all three mech parts are bolted on and the
+            // mech comes online — see syncMechParts → brokenRobot.activate.
+            if (boss == null && brokenRobot.isActive()) {
                 spawnBoss();
             }
         }
