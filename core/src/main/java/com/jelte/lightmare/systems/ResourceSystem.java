@@ -82,6 +82,12 @@ public class ResourceSystem {
         float cx = player.getPosition().x + MathUtils.cos(angle) * distance;
         float cy = player.getPosition().y + MathUtils.sin(angle) * distance;
 
+        // One variant per cluster — all ore in this batch is the same color so
+        // the world reads as little single-color veins instead of a confetti
+        // of mixed colors. The variety comes from picking a new color each
+        // time a new cluster spawns somewhere else.
+        int variant = MathUtils.random(Resources.oreRegions.length - 1);
+
         int count = MathUtils.random(CLUSTER_MIN, CLUSTER_MAX);
         int spawned = 0;
         int attempts = 0;
@@ -91,8 +97,6 @@ public class ResourceSystem {
             float y = cy + MathUtils.random(-CLUSTER_RADIUS, CLUSTER_RADIUS);
             if (!isPositionValid(x, y)) continue;
 
-            // Random ore variant per spawn, using the four atlas regions.
-            int variant = MathUtils.random(Resources.oreRegions.length - 1);
             entityManager.addEntity(new Resource(x, y, Resources.oreRegions[variant], variant));
             spawned++;
         }
