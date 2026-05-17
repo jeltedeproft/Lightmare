@@ -6,6 +6,10 @@ import com.jelte.lightmare.entities.Monster;
 import com.jelte.lightmare.entities.Player;
 
 public class MonsterSystem {
+    /** Hard cap on simultaneously active monsters so the player faces a
+     *  steady threat without being overwhelmed by a swarm. */
+    private static final int MAX_ACTIVE_MONSTERS = 1;
+
     private EntityManager entityManager;
     private float spawnTimer = 0f;
     private float spawnInterval = 5f; // Every 5 seconds
@@ -16,7 +20,7 @@ public class MonsterSystem {
 
     public void update(float delta, Player player) {
         spawnTimer += delta;
-        if (spawnTimer >= spawnInterval) {
+        if (spawnTimer >= spawnInterval && countActiveMonsters() < MAX_ACTIVE_MONSTERS) {
             spawnTimer = 0;
             spawnMonster(player);
         }
@@ -28,6 +32,14 @@ public class MonsterSystem {
                 ((Monster) e).updateAI(player, entityManager.getHouse(), delta);
             }
         }
+    }
+
+    private int countActiveMonsters() {
+        int n = 0;
+        for (int i = 0; i < entityManager.getEntities().size(); i++) {
+            if (entityManager.getEntities().get(i) instanceof Monster) n++;
+        }
+        return n;
     }
 
     private void spawnMonster(Player player) {

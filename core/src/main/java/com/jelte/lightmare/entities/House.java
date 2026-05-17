@@ -23,7 +23,10 @@ public class House extends Entity {
     public static final float GARAGE_X_OFFSET = 24f;
     public static final float GARAGE_WIDTH = 84f;
 
-    private float lightRadius = 240f;
+    // Dimmer than the world map's monsters expect to flee from — they only
+    // recoil when within this radius of the house, so a smaller value lets
+    // them push closer to the walls before turning back.
+    private float lightRadius = 150f;
 
     public House(float x, float y, Texture texture) {
         super(x, y, WIDTH, HEIGHT, texture);
