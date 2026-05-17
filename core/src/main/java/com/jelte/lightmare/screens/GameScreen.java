@@ -269,6 +269,10 @@ public class GameScreen implements Screen {
         float houseX = mapCenterX - House.WIDTH * 0.5f;
         float houseY = mapCenterY - House.HEIGHT * 0.5f;
         house = new House(houseX, houseY, Resources.houseTexture);
+        // Wipe any rock cells under the house — the house sprite covers them
+        // visually, but isBlockedByRocks would otherwise leave parts of the
+        // interior un-walkable wherever the procedural rocks happened to sit.
+        clearRocksUnderHouse(houseX, houseY);
         // Player spawns inside the house at the same relative offset as before.
         player = new Player(houseX + 16, houseY + 10,
             Resources.playerFront, Resources.playerBack,
@@ -1351,6 +1355,24 @@ public class GameScreen implements Screen {
      * treated as solid. We sample every tile the AABB overlaps, so the player
      * never clips into a rock regardless of which corner enters first.
      */
+    /**
+     * Removes every rock cell whose tile-bounds overlap the house's footprint
+     * so the interior is fully walkable. Runs once at startup — the house
+     * doesn't move, and we don't want to fight collision tiles every frame.
+     */
+    private void clearRocksUnderHouse(float houseX, float houseY) {
+        if (rocksLayer == null) return;
+        int minTileX = (int) Math.floor(houseX / mapTileWidth);
+        int maxTileX = (int) Math.floor((houseX + House.WIDTH - 0.001f) / mapTileWidth);
+        int minTileY = (int) Math.floor(houseY / mapTileHeight);
+        int maxTileY = (int) Math.floor((houseY + House.HEIGHT - 0.001f) / mapTileHeight);
+        for (int ty = minTileY; ty <= maxTileY; ty++) {
+            for (int tx = minTileX; tx <= maxTileX; tx++) {
+                rocksLayer.setCell(tx, ty, null);
+            }
+        }
+    }
+
     private boolean isBlockedByRocks(float x, float y, float w, float h) {
         if (rocksLayer == null) return false;
 
