@@ -37,6 +37,7 @@ import com.jelte.lightmare.entities.House;
 import com.jelte.lightmare.entities.Player;
 import com.jelte.lightmare.entities.Monster;
 import com.jelte.lightmare.entities.Resource;
+import com.jelte.lightmare.entities.Torch;
 import com.jelte.lightmare.input.PlayerController;
 import com.jelte.lightmare.systems.EntityManager;
 import com.jelte.lightmare.systems.MonsterSystem;
@@ -53,20 +54,41 @@ import java.util.Map;
 public class GameScreen implements Screen {
     /**
      * Game flow:
-     *   PLAYING ─[deposit threshold reached]─▶ BOSS_INTRO (~1.8s cinematic pan)
+     *   PLAYING ─[3rd mech part attached]─▶ MECH_ACTIVATION (~1.5s power-up)
+     *   MECH_ACTIVATION ─▶ PLAYING (mech walks out, beacon appears)
+     *   PLAYING ─[beacon clicked]─▶ BOSS_INTRO (~1.8s cinematic pan)
      *   BOSS_INTRO ─▶ PLAYING (boss is now an active entity)
      *   PLAYING ─[boss killed]─▶ WITHER (~3.5s red overlay ramps up)
      *   WITHER ─▶ END (silent end screen with restart)
      *   PLAYING ─[HP=0]─▶ GAMEOVER
      */
-    private enum State { PLAYING, BOSS_INTRO, WITHER, PLANET_REVEAL, END, GAMEOVER }
+    private enum State { PLAYING, MECH_ACTIVATION, BOSS_INTRO, WITHER, PLANET_REVEAL, END, GAMEOVER }
     private State state = State.PLAYING;
 
-    // Boss arc — triggered once every robot part is unlocked, i.e. the full
-    // exoskeleton is assembled on the player.
+    // Cinematic timings.
+    private static final float MECH_ACTIVATION_DURATION = 1.5f;
     private static final float BOSS_INTRO_DURATION = 1.8f;
     private static final float WITHER_DURATION = 3.5f;
+    private float mechActivationTimer = 0f;
+    private float mechActivationParticleTimer = 0f;
     private Boss boss;
+
+    // Torches mounted at the four outer corners of the house. The sprite
+    // flickers via its 3-frame animation, and a paired PointLight per torch
+    // pumps its radius along with the current frame for a subtle flame flicker.
+    private static final float TORCH_LIGHT_BASE = 40f;
+    private final List<Torch> torches = new ArrayList<>();
+    private final List<PointLight> torchLights = new ArrayList<>();
+
+    // Boss-summon beacon — a glowing red pillar east of the house that appears
+    // after the mech activates. Clicking it spawns the boss; before then the
+    // boss never appears. Mech bullets ignore it (not a Monster or Boss).
+    private static final float BEACON_W = 16f;
+    private static final float BEACON_H = 32f;
+    private boolean beaconActive = false;
+    private float beaconX, beaconY;
+    private float beaconPulseTimer = 0f;
+    private PointLight beaconLight;
     private float bossIntroTimer = 0f;
     private float witherTimer = 0f;
 
@@ -117,13 +139,17 @@ public class GameScreen implements Screen {
     private static final float MECH_FIRE_RANGE_BOOSTED = 180f;
     private static final float MECH_MINE_RANGE_BASE = 80f;
     private static final float MECH_MINE_RANGE_BOOSTED = 140f;
-    private static final float MECH_FIRE_COOLDOWN = 1.0f;
+    private static final float MECH_FIRE_COOLDOWN = 2.0f;
     private static final float MECH_MINE_DISTANCE = 28f;
     private static final float MECH_WANDER_REPICK = 3f;
     private float mechFireTimer = 0f;
     private float mechWanderTimer = 0f;
     private final Vector2 mechWanderTarget = new Vector2();
     private Resource mechMiningTarget;
+    /** Flips true once the assembled mech has walked south of the house. Until
+     *  then the mech is still inside (drawn by renderInsideView), AI is in
+     *  walk-out mode, and the south wall is passable for it. */
+    private boolean mechHasArrivedOutside = false;
 
     // House interior state
     private boolean playerInside = false;
@@ -201,7 +227,7 @@ public class GameScreen implements Screen {
         TmxMapLoader.Parameters mapParams = new TmxMapLoader.Parameters();
         mapParams.textureMinFilter = Texture.TextureFilter.Nearest;
         mapParams.textureMagFilter = Texture.TextureFilter.Nearest;
-        tiledMap = new InfiniteTmxMapLoader().load("map/map2.tmx", mapParams);
+        tiledMap = new InfiniteTmxMapLoader().load("map/map.tmx", mapParams);
         mapRenderer = new OrthogonalTiledMapRenderer(tiledMap);
         rocksLayer = (TiledMapTileLayer) tiledMap.getLayers().get("rocks");
         mapTileWidth = tiledMap.getProperties().get("tilewidth", Integer.class);
@@ -257,6 +283,8 @@ public class GameScreen implements Screen {
         houseLight = new PointLight(rayHandler, 128, new Color(1, 1, 1, 0.8f), house.getLightRadius(), house.getCenterX(), house.getCenterY());
         playerLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.9f), player.getLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
         emergencyLight = new PointLight(rayHandler, 32, new Color(1, 1, 1, 0.3f), player.getEmergencyLightRadius(), player.getPosition().x + 8, player.getPosition().y + 8);
+
+        spawnTorches(houseX, houseY);
 
         // Procedural ore spawning: a starting cluster near the player, then the
         // ResourceSystem keeps a target count seeded around them as they wander.
@@ -317,7 +345,7 @@ public class GameScreen implements Screen {
         // WITHER is a frozen cinematic — everything pauses while the world dies.
         // BOSS_INTRO keeps the world ticking but locks player input so the
         // camera pan reads as "the game is showing you something".
-        boolean updatesFrozen = state == State.WITHER;
+        boolean updatesFrozen = state == State.WITHER || state == State.MECH_ACTIVATION;
         boolean playerInputAllowed = state == State.PLAYING;
 
         // Update logic
@@ -337,6 +365,7 @@ public class GameScreen implements Screen {
             particleSystem.update(delta);
             updateBullets();
             updateMechAI(delta);
+            updateTorchLights();
             // Boss has phase-dependent AI (chase shell, flee cute) — only active
             // once the intro pan has handed control back to the player.
             if (boss != null && state == State.PLAYING) {
@@ -365,7 +394,9 @@ public class GameScreen implements Screen {
         }
 
         // State timers (after click handling so this-frame transitions render correctly)
-        if (state == State.BOSS_INTRO) {
+        if (state == State.MECH_ACTIVATION) {
+            updateMechActivationCinematic(delta);
+        } else if (state == State.BOSS_INTRO) {
             bossIntroTimer -= delta;
             if (bossIntroTimer <= 0f) state = State.PLAYING;
         } else if (state == State.WITHER) {
@@ -468,6 +499,7 @@ public class GameScreen implements Screen {
             renderInsideView();
         } else {
             entityManager.render(batch);
+            renderBeacon(delta);
             // No programmatic door overlay — the house.png sprite already shows
             // the door art, and the logical doorway sits under it via DOOR_X_OFFSET.
         }
@@ -554,6 +586,17 @@ public class GameScreen implements Screen {
         Vector3 worldCoords = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
         viewport.unproject(worldCoords);
 
+        // Click the boss-summon beacon — only available once the mech has
+        // activated. Removes the beacon and kicks off the boss intro.
+        if (beaconActive
+            && worldCoords.x >= beaconX && worldCoords.x <= beaconX + BEACON_W
+            && worldCoords.y >= beaconY && worldCoords.y <= beaconY + BEACON_H) {
+            beaconActive = false;
+            if (beaconLight != null) { beaconLight.remove(); beaconLight = null; }
+            spawnBoss();
+            return;
+        }
+
         // Click on the boss — close-range attack like mining. After 5 hits the
         // boss is dead and we kick off the WITHER cinematic.
         if (boss != null && !boss.isDead()
@@ -597,35 +640,160 @@ public class GameScreen implements Screen {
         }
     }
 
+    /** Texture shown on each chest to advertise what that color of ore
+     *  unlocks. Variant order matches Resources.oreRegions:
+     *  0=blue/VISION → eye icon, 1=green/LEGS, 2=orange/DRILL, 3=purple/GUN. */
+    private Texture unlockIconForVariant(int variant) {
+        switch (variant) {
+            case 0: return Resources.iconVision;
+            case 1: return Resources.robotLegsTexture;
+            case 2: return Resources.robotDrillTexture;
+            case 3: return Resources.robotWeaponTexture;
+            default: return null;
+        }
+    }
+
     private void syncMechParts() {
         boolean wasActive = brokenRobot.isActive();
         if (upgradeSystem.isUnlocked(Upgrade.LEGS))  brokenRobot.attachLegs();
         if (upgradeSystem.isUnlocked(Upgrade.DRILL)) brokenRobot.attachDrill();
         if (upgradeSystem.isUnlocked(Upgrade.GUN))   brokenRobot.attachWeapon();
         if (!wasActive && brokenRobot.isActive()) {
-            onMechActivated();
+            startMechActivationCinematic();
         }
     }
 
     /**
-     * Move the now-active mech just south of the garage opening, hand it over
-     * to entityManager so it renders during the outside pass, and give it a
-     * PointLight so the player can spot it out in the dark. From here the AI
-     * in updateMechAI takes over.
+     * Pause the world, play a power-up sound, and burst particles around the
+     * mech so the third-part install reads as a deliberate "it just turned on"
+     * beat. After MECH_ACTIVATION_DURATION the mech relocates outside and the
+     * beacon appears (see render loop's state machine).
      */
-    private void onMechActivated() {
-        float outX = house.getGarageX() + House.GARAGE_WIDTH * 0.5f - BrokenRobot.WIDTH * 0.5f;
-        float outY = house.getPosition().y - BrokenRobot.HEIGHT - 8f;
-        brokenRobot.setPosition(outX, outY);
+    /**
+     * Torches scattered around the house perimeter at hand-picked positions
+     * (relative to the house origin) so the placement reads as organic rather
+     * than the four-corner-rectangle that a symmetric loop produced. Tweak
+     * entries here to add/remove torches or shift their spots.
+     *
+     * Offsets are (dx, dy) from (houseX, houseY); negative values place the
+     * torch outside the house on the left/bottom edge.
+     */
+    private void spawnTorches(float houseX, float houseY) {
+        if (Resources.torchFrames == null || Resources.torchFrames.length == 0) return;
+        float[][] offsets = {
+            {  56f, House.HEIGHT + 4f },          // North wall, left-of-center
+            { House.WIDTH + 4f, 92f },            // East wall, upper
+            { House.WIDTH - 20f, -18f }           // South-east, well below the wall
+        };
+        for (float[] o : offsets) {
+            float tx = houseX + o[0];
+            float ty = houseY + o[1];
+            Torch t = new Torch(tx, ty, Resources.torchFrames);
+            torches.add(t);
+            entityManager.addEntity(t);
+            PointLight l = new PointLight(rayHandler, 32,
+                new Color(1, 1, 1, 0.9f), TORCH_LIGHT_BASE,
+                tx + Torch.WIDTH * 0.5f, ty + Torch.HEIGHT * 0.5f);
+            torchLights.add(l);
+        }
+    }
+
+    /**
+     * Pump each torch light's radius along with its current animation frame
+     * so the cast light pulses on the same beat as the flame sprite. Lights
+     * stay at fixed positions — only the radius changes.
+     */
+    private void updateTorchLights() {
+        for (int i = 0; i < torches.size(); i++) {
+            int frame = torches.get(i).getCurrentFrame();
+            // 0 → 1.00, 1 → 1.08, 2 → 0.94 — small irregular flicker.
+            float scale = frame == 0 ? 1.00f : (frame == 1 ? 1.08f : 0.94f);
+            torchLights.get(i).setDistance(TORCH_LIGHT_BASE * scale);
+        }
+    }
+
+    private void spawnBeacon() {
+        beaconActive = true;
+        beaconX = house.getPosition().x + House.WIDTH + 32f;
+        beaconY = house.getPosition().y + House.HEIGHT * 0.5f - BEACON_H * 0.5f;
+        beaconLight = new PointLight(rayHandler, 32,
+            new Color(1f, 0.25f, 0.15f, 0.9f),
+            96f, beaconX + BEACON_W * 0.5f, beaconY + BEACON_H * 0.5f);
+    }
+
+    private void renderBeacon(float delta) {
+        if (!beaconActive) return;
+        beaconPulseTimer += delta;
+        // Body brightness pulses so the beacon reads as an active, clickable
+        // thing rather than scenery.
+        float pulse = 0.55f + 0.45f * (0.5f + 0.5f * MathUtils.sin(beaconPulseTimer * 3.5f));
+        batch.setColor(1f * pulse, 0.18f * pulse, 0.12f * pulse, 1f);
+        batch.draw(Resources.pixelTexture, beaconX, beaconY, BEACON_W, BEACON_H);
+        // Bright cap on top — looks like a glowing crystal or filament.
+        batch.setColor(1f, 0.85f * pulse, 0.55f * pulse, 1f);
+        batch.draw(Resources.pixelTexture,
+            beaconX + 3f, beaconY + BEACON_H - 6f, BEACON_W - 6f, 5f);
+        batch.setColor(Color.WHITE);
+    }
+
+    private void updateMechActivationCinematic(float delta) {
+        mechActivationTimer -= delta;
+        mechActivationParticleTimer -= delta;
+        // World updates are frozen during the cinematic, so the particle
+        // system needs an explicit tick to drain its current particles.
+        particleSystem.update(delta);
+        if (mechActivationParticleTimer <= 0f) {
+            float mx = brokenRobot.getPosition().x + BrokenRobot.WIDTH * 0.5f;
+            float my = brokenRobot.getPosition().y + BrokenRobot.HEIGHT * 0.5f;
+            particleSystem.burst(mx, my, 6);
+            mechActivationParticleTimer = 0.15f;
+        }
+        if (mechActivationTimer <= 0f) {
+            // Resume world updates. Mech stays at its inside position showing
+            // the fully-assembled sprite; updateMechAI's walk-out branch will
+            // steer it through the garage. Beacon spawns once it's fully out.
+            state = State.PLAYING;
+        }
+    }
+
+    private void startMechActivationCinematic() {
+        state = State.MECH_ACTIVATION;
+        mechActivationTimer = MECH_ACTIVATION_DURATION;
+        mechActivationParticleTimer = 0f;
+        Resources.powerUpSound.play();
+        triggerShake(3f);
+        float mx = brokenRobot.getPosition().x + BrokenRobot.WIDTH * 0.5f;
+        float my = brokenRobot.getPosition().y + BrokenRobot.HEIGHT * 0.5f;
+        particleSystem.burst(mx, my, 25);
+    }
+
+    /**
+     * Fires the moment the walking-out mech crosses south of the house wall.
+     * Hands it over to entityManager so the outside pass picks it up, lights
+     * it so the player can see it, and plants the boss-summon beacon now that
+     * the mech has fully deployed. From here the full AI in updateMechAI
+     * (shoot / mine / wander) takes over.
+     */
+    private void onMechReachedOutside() {
+        mechHasArrivedOutside = true;
         entityManager.addEntity(brokenRobot);
-        // Modest circular glow so the mech is visible at night, not as bright
-        // as the player's headlight (the mech runs on internal power).
         mechLight = new PointLight(rayHandler, 64, new Color(1, 1, 1, 0.7f),
-            80f, outX + BrokenRobot.WIDTH * 0.5f, outY + BrokenRobot.HEIGHT * 0.5f);
+            80f,
+            brokenRobot.getPosition().x + BrokenRobot.WIDTH * 0.5f,
+            brokenRobot.getPosition().y + BrokenRobot.HEIGHT * 0.5f);
+        spawnBeacon();
     }
 
     private void updateMechAI(float delta) {
         if (!brokenRobot.isActive()) return;
+
+        // Phase 1: still inside the house. The mech walks south through the
+        // garage opening, then promotes itself to "arrived outside" which
+        // hands it to entityManager and spawns the boss beacon.
+        if (!mechHasArrivedOutside) {
+            walkMechOut(delta);
+            return;
+        }
 
         mechFireTimer -= delta;
         float fireRange = upgradeSystem.isUnlocked(Upgrade.VISION)
@@ -713,6 +881,37 @@ public class GameScreen implements Screen {
         }
     }
 
+    /**
+     * Walk-out behavior — mech steers toward an outside target south of the
+     * garage. The collision check in moveMechToward switches to allowDoor=true
+     * via mechHasArrivedOutside being false, so the garage opening is passable.
+     * Once the mech's center is south of the house's south wall, promote.
+     */
+    private void walkMechOut(float delta) {
+        float prevX = brokenRobot.getPosition().x;
+        float prevY = brokenRobot.getPosition().y;
+        float targetCx = house.getGarageX() + House.GARAGE_WIDTH * 0.5f;
+        float targetCy = house.getPosition().y - BrokenRobot.HEIGHT * 0.5f - 8f;
+        moveMechToward(targetCx, targetCy, delta);
+
+        float dx = brokenRobot.getPosition().x - prevX;
+        float dy = brokenRobot.getPosition().y - prevY;
+        if (dx * dx + dy * dy > 0.01f) {
+            footstepCooldown -= delta;
+            if (footstepCooldown <= 0f) {
+                Resources.robotwalkSound.play();
+                footstepCooldown = FOOTSTEP_INTERVAL;
+            }
+        } else {
+            footstepCooldown = 0f;
+        }
+
+        float mechCy = brokenRobot.getPosition().y + BrokenRobot.HEIGHT * 0.5f;
+        if (mechCy < house.getPosition().y) {
+            onMechReachedOutside();
+        }
+    }
+
     private Entity findNearestHostile(float cx, float cy, float range) {
         Entity best = null;
         float bestDist2 = range * range;
@@ -769,14 +968,18 @@ public class GameScreen implements Screen {
         dy /= len;
         float stepX = dx * MECH_SPEED * delta;
         float stepY = dy * MECH_SPEED * delta;
+        // Garage and door are passable while the mech is walking out; once
+        // it's arrived outside, the south wall locks back to fully solid so
+        // it doesn't wander back into the house.
+        boolean passGarage = !mechHasArrivedOutside;
         float newX = px + stepX;
         if (!isBlockedByRocks(newX, py, w, h)
-            && !house.isBlockedByWall(newX, py, w, h, false)) {
+            && !house.isBlockedByWall(newX, py, w, h, passGarage)) {
             px = newX;
         }
         float newY = py + stepY;
         if (!isBlockedByRocks(px, newY, w, h)
-            && !house.isBlockedByWall(px, newY, w, h, false)) {
+            && !house.isBlockedByWall(px, newY, w, h, passGarage)) {
             py = newY;
         }
         brokenRobot.setPosition(px, py);
@@ -1158,9 +1361,10 @@ public class GameScreen implements Screen {
             house.getGarageX(), hp.y, House.GARAGE_WIDTH, wallThickness);
 
         // Four storage chests along the back wall, one per ore variant.
-        // Chest body is tinted to match the ore color, the ore sprite sits on
-        // top, and a row of 10 progress pips above the chest lights up as ore
-        // is deposited — when all ten light, the matching robot part unlocks.
+        // Chest body is tinted to match the ore color, the matching part
+        // sprite (or vision eye icon for blue) sits on top so the player can
+        // tell at a glance what each color unlocks, and a row of 10 progress
+        // pips above the chest lights up as ore is deposited.
         int n = STORAGE_COLORS.length;
         float chestW = 26f;
         float chestH = 18f;
@@ -1181,12 +1385,18 @@ public class GameScreen implements Screen {
             batch.setColor(STORAGE_COLORS[i]);
             batch.draw(Resources.pixelTexture, chestX, chestY, chestW, chestH);
 
-            // Ore icon sitting on the chest
+            // Part-or-vision icon sitting on the chest — tells the player what
+            // each ore color is going to unlock without any text.
             batch.setColor(Color.WHITE);
-            float oreSize = 14f;
-            float oreX = chestX + (chestW - oreSize) * 0.5f;
-            float oreY = chestY + (chestH - oreSize) * 0.5f;
-            batch.draw(Resources.oreRegions[i], oreX, oreY, oreSize, oreSize);
+            float iconSize = 14f;
+            float iconX = chestX + (chestW - iconSize) * 0.5f;
+            float iconY = chestY + (chestH - iconSize) * 0.5f;
+            Texture chestIcon = unlockIconForVariant(i);
+            if (chestIcon != null) {
+                batch.draw(chestIcon, iconX, iconY, iconSize, iconSize);
+            } else {
+                batch.draw(Resources.oreRegions[i], iconX, iconY, iconSize, iconSize);
+            }
 
             // Progress pips above the chest.
             float pipsStartX = chestX + (chestW - pipsTotalW) * 0.5f;
@@ -1199,10 +1409,11 @@ public class GameScreen implements Screen {
         }
         batch.setColor(Color.WHITE);
 
-        // Broken mech in the middle of the floor while it's still being built.
-        // Once activated, it relocates outside and renders via entityManager
-        // instead, so we skip the manual draw here.
-        if (!brokenRobot.isActive()) {
+        // The mech is drawn here for both phases when it's still inside: the
+        // broken assembly phase and the brief moment after activation when
+        // it's walking out through the garage. Once it crosses the south wall
+        // (mechHasArrivedOutside) entityManager takes over the rendering.
+        if (!mechHasArrivedOutside) {
             brokenRobot.render(batch);
         }
 
@@ -1250,13 +1461,12 @@ public class GameScreen implements Screen {
             }
         }
         if (anyUnlocked) {
+            // syncMechParts may launch the mech-activation cinematic when the
+            // third part comes online; the boss is no longer auto-summoned —
+            // it spawns when the player clicks the beacon that appears after
+            // the cinematic. See startMechActivationCinematic + spawnBeacon.
             syncMechParts();
             Resources.powerUpSound.play();
-            // Boss triggers when all three mech parts are bolted on and the
-            // mech comes online — see syncMechParts → brokenRobot.activate.
-            if (boss == null && brokenRobot.isActive()) {
-                spawnBoss();
-            }
         }
     }
 

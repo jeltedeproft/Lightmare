@@ -25,6 +25,8 @@ public class Resources {
     public static TextureRegion playerLeft;
     public static TextureRegion playerRight;
     public static TextureRegion skullguyRegion;
+    /** Animation frames for the torch sprite (torch_1/_2/_3 in the atlas). */
+    public static TextureRegion[] torchFrames;
 
     // House + robot sprites, loaded as standalone textures so the atlas does
     // not need to be repacked for these additions.
@@ -41,6 +43,11 @@ public class Resources {
     //   index = (legs?1:0)<<2 | (drill?1:0)<<1 | (weapon?1:0)
     //   0=none, 1=W, 2=D, 3=DW, 4=L, 5=LW, 6=LD, 7=all (=workingRobot)
     public static Texture[] mechCombinationTextures = new Texture[8];
+
+    // Programmatic eye icon used on the blue (VISION) chest. The other three
+    // chests show their actual part sprite, but VISION has no physical part,
+    // so we draw a small eye instead.
+    public static Texture iconVision;
 
     // Boss placeholders — programmatic until real art lands.
     public static Texture bossShellTexture;
@@ -82,6 +89,13 @@ public class Resources {
         playerLeft = atlas.findRegion("lilguyLeft");
         playerRight = atlas.findRegion("lilguyRight");
         skullguyRegion = atlas.findRegion("skullguy");
+        // TexturePacker strips the "_1/_2/_3" suffix and stores them indexed
+        // under "torch"; findRegions returns them sorted by that index.
+        com.badlogic.gdx.utils.Array<TextureAtlas.AtlasRegion> torchRegs = atlas.findRegions("torch");
+        torchFrames = new TextureRegion[torchRegs.size];
+        for (int i = 0; i < torchRegs.size; i++) {
+            torchFrames[i] = torchRegs.get(i);
+        }
 
         houseTexture = loadPixelTexture("sprites/items/house.png");
         brokenRobotTexture = loadPixelTexture("sprites/items/brokenRobot.png");
@@ -101,6 +115,8 @@ public class Resources {
         mechCombinationTextures[5] = loadPixelTextureOrNull("sprites/items/brokenRobot_LW.png");
         mechCombinationTextures[6] = loadPixelTextureOrNull("sprites/items/brokenRobot_LD.png");
         mechCombinationTextures[7] = workingRobotTexture;
+
+        iconVision = createVisionIcon(32, 32);
 
         bossShellTexture = createBossShellPlaceholder(64, 64);
         bossCuteTexture = createBossCutePlaceholder(32, 32);
@@ -146,6 +162,27 @@ public class Resources {
             }
         }
         return tracks.toArray(new Music[0]);
+    }
+
+    private static Texture createVisionIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        int cx = w / 2, cy = h / 2;
+        // Sclera, iris, pupil — concentric circles read as an eye even when
+        // scaled down to chest size.
+        p.setColor(Color.WHITE);
+        p.fillCircle(cx, cy, w * 3 / 8);
+        p.setColor(0.35f, 0.4f, 0.5f, 1f);
+        p.fillCircle(cx, cy, w / 4);
+        p.setColor(Color.BLACK);
+        p.fillCircle(cx, cy, w / 8);
+        // Catchlight off-center so it reads as a living eye, not a target.
+        p.setColor(Color.WHITE);
+        p.fillCircle(cx - w / 12, cy - w / 12, 1);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        p.dispose();
+        return t;
     }
 
     private static Texture loadPixelTexture(String path) {
@@ -396,6 +433,7 @@ public class Resources {
         if (robotLegsTexture != null) robotLegsTexture.dispose();
         if (robotDrillTexture != null) robotDrillTexture.dispose();
         if (robotWeaponTexture != null) robotWeaponTexture.dispose();
+        if (iconVision != null) iconVision.dispose();
         if (bossShellTexture != null) bossShellTexture.dispose();
         if (bossCuteTexture != null) bossCuteTexture.dispose();
         if (starsTexture != null) starsTexture.dispose();
