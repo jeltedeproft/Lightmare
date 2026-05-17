@@ -48,6 +48,10 @@ public class Resources {
     // chests show their actual part sprite, but VISION has no physical part,
     // so we draw a small eye instead.
     public static Texture iconVision;
+    // Small icons drawn beside the HUD bars at the top of the screen so the
+    // player can tell what each bar measures at a glance.
+    public static Texture iconBatteryHud;
+    public static Texture iconHeartHud;
 
     // Boss placeholders — programmatic until real art lands.
     public static Texture bossShellTexture;
@@ -117,6 +121,8 @@ public class Resources {
         mechCombinationTextures[7] = workingRobotTexture;
 
         iconVision = createVisionIcon(32, 32);
+        iconBatteryHud = createBatteryHudIcon(10, 10);
+        iconHeartHud = createHeartHudIcon(10, 10);
 
         bossShellTexture = createBossShellPlaceholder(64, 64);
         bossCuteTexture = createBossCutePlaceholder(32, 32);
@@ -162,6 +168,39 @@ public class Resources {
             }
         }
         return tracks.toArray(new Music[0]);
+    }
+
+    private static Texture createBatteryHudIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        p.setColor(Color.WHITE);
+        // Battery body outline takes the left ~80% of the icon; the small
+        // positive nub sits on the right edge.
+        int bodyW = w - 2;
+        int bodyH = h - 2;
+        p.drawRectangle(0, 1, bodyW, bodyH);
+        p.fillRectangle(bodyW, 3, 2, bodyH - 4);
+        // Inner fill cells so it doesn't read as a hollow rectangle.
+        p.fillRectangle(2, 3, bodyW - 4, bodyH - 4);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
+    }
+
+    private static Texture createHeartHudIcon(int w, int h) {
+        Pixmap p = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        p.setColor(0, 0, 0, 0); p.fill();
+        p.setColor(Color.SCARLET);
+        // Pixel-art heart: two circles for the lobes + a triangle pointing
+        // down for the bottom. Tuned for a 10x10 cell with a 1px margin.
+        p.fillCircle(3, 3, 2);
+        p.fillCircle(7, 3, 2);
+        p.fillTriangle(0, 4, w - 1, 4, w / 2, h - 1);
+        Texture t = new Texture(p);
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        p.dispose();
+        return t;
     }
 
     private static Texture createVisionIcon(int w, int h) {
@@ -434,6 +473,8 @@ public class Resources {
         if (robotDrillTexture != null) robotDrillTexture.dispose();
         if (robotWeaponTexture != null) robotWeaponTexture.dispose();
         if (iconVision != null) iconVision.dispose();
+        if (iconBatteryHud != null) iconBatteryHud.dispose();
+        if (iconHeartHud != null) iconHeartHud.dispose();
         if (bossShellTexture != null) bossShellTexture.dispose();
         if (bossCuteTexture != null) bossCuteTexture.dispose();
         if (starsTexture != null) starsTexture.dispose();

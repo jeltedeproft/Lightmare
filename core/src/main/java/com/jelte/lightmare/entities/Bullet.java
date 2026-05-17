@@ -6,20 +6,19 @@ import com.badlogic.gdx.math.Vector2;
 import com.jelte.lightmare.Resources;
 
 /**
- * Straight-line projectile fired by the player once the gun upgrade is maxed.
- * Travels at constant velocity until it hits a monster, hits the boss, or runs
- * out of range — at which point GameScreen removes it from the entity list.
+ * Straight-line projectile fired by the mech. Travels at constant velocity
+ * until it hits a monster, hits the boss, or flies off the map — GameScreen
+ * is in charge of the map-bounds check (it owns the tilemap) and removes the
+ * bullet plus its tracer light from the world.
  *
  * Renders as a small bright square; we deliberately avoid sprite art so the
  * bullet reads as a pure light dot inside the dithered darkness.
  */
 public class Bullet extends Entity {
     public static final float SPEED = 260f;
-    public static final float MAX_DISTANCE = 160f;
     private static final float SIZE = 3f;
 
     private final Vector2 velocity;
-    private float traveled = 0f;
     private boolean spent = false;
 
     public Bullet(float x, float y, float dirX, float dirY) {
@@ -32,11 +31,7 @@ public class Bullet extends Entity {
     @Override
     public void update(float delta) {
         if (spent) return;
-        float dx = velocity.x * delta;
-        float dy = velocity.y * delta;
-        position.add(dx, dy);
-        traveled += (float) Math.sqrt(dx * dx + dy * dy);
-        if (traveled >= MAX_DISTANCE) spent = true;
+        position.add(velocity.x * delta, velocity.y * delta);
     }
 
     public boolean isSpent() { return spent; }

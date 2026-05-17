@@ -205,6 +205,8 @@ public class GameScreen implements Screen {
     private TiledMapTileLayer rocksLayer;
     private int mapTileWidth;
     private int mapTileHeight;
+    private float mapWorldWidth;
+    private float mapWorldHeight;
 
     // UI Effects
     private float pulseTimer = 0;
@@ -260,8 +262,10 @@ public class GameScreen implements Screen {
         // working if the map is resized in Tiled.
         int mapTilesWide = tiledMap.getProperties().get("width", Integer.class);
         int mapTilesTall = tiledMap.getProperties().get("height", Integer.class);
-        float mapCenterX = mapTilesWide * mapTileWidth * 0.5f;
-        float mapCenterY = mapTilesTall * mapTileHeight * 0.5f;
+        mapWorldWidth = mapTilesWide * mapTileWidth;
+        mapWorldHeight = mapTilesTall * mapTileHeight;
+        float mapCenterX = mapWorldWidth * 0.5f;
+        float mapCenterY = mapWorldHeight * 0.5f;
         float houseX = mapCenterX - House.WIDTH * 0.5f;
         float houseY = mapCenterY - House.HEIGHT * 0.5f;
         house = new House(houseX, houseY, Resources.houseTexture);
@@ -1035,6 +1039,15 @@ public class GameScreen implements Screen {
                 light.setPosition(b.getPosition().x + 1.5f, b.getPosition().y + 1.5f);
             }
 
+            // Map-bounds despawn — the bullet flies forever until it hits a
+            // monster, the boss, or leaves the playable tilemap area.
+            float bx = b.getPosition().x;
+            float by = b.getPosition().y;
+            if (bx < 0f || by < 0f
+                || bx > mapWorldWidth || by > mapWorldHeight) {
+                b.markSpent();
+            }
+
             if (b.isSpent()) {
                 if (toRemove == null) toRemove = new ArrayList<>();
                 toRemove.add(b);
@@ -1499,9 +1512,16 @@ public class GameScreen implements Screen {
         batch.getProjectionMatrix().setToOrtho2D(0, 0, 320, 180);
         batch.begin();
 
+        // Icon to the left of each bar so the bar's meaning is self-evident.
+        // Both bars are 50px wide starting at x=12 (was x=10), with a 10px
+        // icon occupying x=1..11.
+        batch.setColor(Color.WHITE);
+        batch.draw(Resources.iconBatteryHud, 1, 160, 10, 10);
+        batch.draw(Resources.iconHeartHud,   1, 145, 10, 10);
+
         // Draw battery background (dark gray)
         batch.setColor(Color.DARK_GRAY);
-        batch.draw(Resources.pixelTexture, 10, 160, 50, 10);
+        batch.draw(Resources.pixelTexture, 12, 160, 50, 10);
 
         // Draw battery level (green to red based on level)
         float batteryPct = player.getBatteryLevel() / player.getMaxBattery();
@@ -1512,14 +1532,14 @@ public class GameScreen implements Screen {
         } else {
             batch.setColor(Color.RED);
         }
-        batch.draw(Resources.pixelTexture, 11, 161, 48 * batteryPct, 8);
+        batch.draw(Resources.pixelTexture, 13, 161, 48 * batteryPct, 8);
 
         // Draw HP bar
         batch.setColor(Color.DARK_GRAY);
-        batch.draw(Resources.pixelTexture, 10, 145, 50, 10);
+        batch.draw(Resources.pixelTexture, 12, 145, 50, 10);
         batch.setColor(Color.SCARLET);
         float hpPct = player.getHp() / player.getMaxHp();
-        batch.draw(Resources.pixelTexture, 11, 146, 48 * hpPct, 8);
+        batch.draw(Resources.pixelTexture, 13, 146, 48 * hpPct, 8);
 
         // Reset color for other renderings
         batch.setColor(Color.WHITE);
