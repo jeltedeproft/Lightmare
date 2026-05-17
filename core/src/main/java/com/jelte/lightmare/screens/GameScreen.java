@@ -134,14 +134,21 @@ public class GameScreen implements Screen {
 
     // Active mech AI tuning. Ranges expand when VISION is unlocked so the
     // upgrade has a tangible effect on how aggressively the mech reaches out.
+    /** Speed used when chasing a hostile or committed to a mining target. */
     private static final float MECH_SPEED = 80f;
+    /** Slower default speed while patrolling so it reads as wandering, not racing. */
+    private static final float MECH_WANDER_SPEED = 30f;
+    /** Probability of switching from "pick new wander target" to "go mine this
+     *  ore" when one is nearby — keeps mining occasional instead of constant. */
+    private static final float MECH_MINE_CHANCE = 0.35f;
     private static final float MECH_FIRE_RANGE_BASE = 100f;
     private static final float MECH_FIRE_RANGE_BOOSTED = 180f;
     private static final float MECH_MINE_RANGE_BASE = 80f;
     private static final float MECH_MINE_RANGE_BOOSTED = 140f;
     private static final float MECH_FIRE_COOLDOWN = 2.0f;
     private static final float MECH_MINE_DISTANCE = 28f;
-    private static final float MECH_WANDER_REPICK = 3f;
+    /** Long enough that the slow wander speed can usually reach the target. */
+    private static final float MECH_WANDER_REPICK = 8f;
     private float mechFireTimer = 0f;
     private float mechWanderTimer = 0f;
     private final Vector2 mechWanderTarget = new Vector2();
@@ -806,6 +813,8 @@ public class GameScreen implements Screen {
         float cx = prevX + BrokenRobot.WIDTH * 0.5f;
         float cy = prevY + BrokenRobot.HEIGHT * 0.5f;
 
+        // Priority 1: hostile in fire range always interrupts. Chase + shoot
+        // at the engage speed so the mech actually closes the gap on monsters.
         Entity hostile = findNearestHostile(cx, cy, fireRange);
         if (hostile != null) {
             mechMiningTarget = null;
@@ -816,38 +825,47 @@ public class GameScreen implements Screen {
                 fireBullet(cx, cy, hcx, hcy);
                 mechFireTimer = MECH_FIRE_COOLDOWN;
             }
-        } else {
-            if (mechMiningTarget == null || mechMiningTarget.isMined()) {
-                mechMiningTarget = findNearestOre(cx, cy, mineRange);
-            }
-            if (mechMiningTarget != null) {
-                float ox = mechMiningTarget.getPosition().x + mechMiningTarget.getSize().x * 0.5f;
-                float oy = mechMiningTarget.getPosition().y + mechMiningTarget.getSize().y * 0.5f;
-                float dx = ox - cx;
-                float dy = oy - cy;
-                if (dx * dx + dy * dy < MECH_MINE_DISTANCE * MECH_MINE_DISTANCE) {
-                    boolean finished = mechMiningTarget.click();
-                    Resources.mineSound.play();
-                    if (finished) {
-                        int v = mechMiningTarget.getVariant();
-                        if (v >= 0 && v < storageCounts.length
-                            && storageCounts[v] < UpgradeSystem.UNLOCK_THRESHOLD) {
-                            storageCounts[v]++;
-                        }
-                        entityManager.removeEntity(mechMiningTarget);
-                        mechMiningTarget = null;
-                        // VISION can still unlock after the mech is active —
-                        // pick it up if this deposit just crossed the threshold.
-                        checkPartUnlocks();
+        }
+        // Priority 2: already committed to a mining target — finish the job.
+        else if (mechMiningTarget != null && !mechMiningTarget.isMined()) {
+            float ox = mechMiningTarget.getPosition().x + mechMiningTarget.getSize().x * 0.5f;
+            float oy = mechMiningTarget.getPosition().y + mechMiningTarget.getSize().y * 0.5f;
+            float dx = ox - cx;
+            float dy = oy - cy;
+            if (dx * dx + dy * dy < MECH_MINE_DISTANCE * MECH_MINE_DISTANCE) {
+                boolean finished = mechMiningTarget.click();
+                Resources.mineSound.play();
+                if (finished) {
+                    int v = mechMiningTarget.getVariant();
+                    if (v >= 0 && v < storageCounts.length
+                        && storageCounts[v] < UpgradeSystem.UNLOCK_THRESHOLD) {
+                        storageCounts[v]++;
                     }
-                } else {
-                    moveMechToward(ox, oy, delta);
+                    entityManager.removeEntity(mechMiningTarget);
+                    mechMiningTarget = null;
+                    // VISION can still unlock after the mech is active —
+                    // pick it up if this deposit just crossed the threshold.
+                    checkPartUnlocks();
                 }
             } else {
-                mechWanderTimer -= delta;
-                float dxw = mechWanderTarget.x - cx;
-                float dyw = mechWanderTarget.y - cy;
-                if (mechWanderTimer <= 0f || dxw * dxw + dyw * dyw < 64f) {
+                moveMechToward(ox, oy, delta);
+            }
+        }
+        // Default: slow wander. Each time we re-pick a wander target there's
+        // a chance to opportunistically commit to mining a nearby ore instead
+        // — that's what makes mining feel occasional rather than constant.
+        else {
+            mechMiningTarget = null;
+            mechWanderTimer -= delta;
+            float dxw = mechWanderTarget.x - cx;
+            float dyw = mechWanderTarget.y - cy;
+            boolean reachedTarget = dxw * dxw + dyw * dyw < 64f;
+            if (mechWanderTimer <= 0f || reachedTarget) {
+                if (MathUtils.randomBoolean(MECH_MINE_CHANCE)) {
+                    mechMiningTarget = findNearestOre(cx, cy, mineRange);
+                }
+                if (mechMiningTarget == null) {
+                    // Pick a new wander spot in the ring around the house.
                     float angle = MathUtils.random(0f, MathUtils.PI2);
                     float distFromHouse = MathUtils.random(80f, 180f);
                     mechWanderTarget.set(
@@ -855,7 +873,9 @@ public class GameScreen implements Screen {
                         house.getCenterY() + MathUtils.sin(angle) * distFromHouse);
                     mechWanderTimer = MECH_WANDER_REPICK;
                 }
-                moveMechToward(mechWanderTarget.x, mechWanderTarget.y, delta);
+            }
+            if (mechMiningTarget == null) {
+                moveMechToward(mechWanderTarget.x, mechWanderTarget.y, delta, MECH_WANDER_SPEED);
             }
         }
 
@@ -954,6 +974,10 @@ public class GameScreen implements Screen {
      * garage and door are passable for the player.
      */
     private void moveMechToward(float tx, float ty, float delta) {
+        moveMechToward(tx, ty, delta, MECH_SPEED);
+    }
+
+    private void moveMechToward(float tx, float ty, float delta, float speed) {
         float px = brokenRobot.getPosition().x;
         float py = brokenRobot.getPosition().y;
         float w = BrokenRobot.WIDTH;
@@ -966,8 +990,8 @@ public class GameScreen implements Screen {
         if (len < 0.01f) return;
         dx /= len;
         dy /= len;
-        float stepX = dx * MECH_SPEED * delta;
-        float stepY = dy * MECH_SPEED * delta;
+        float stepX = dx * speed * delta;
+        float stepY = dy * speed * delta;
         // Garage and door are passable while the mech is walking out; once
         // it's arrived outside, the south wall locks back to fully solid so
         // it doesn't wander back into the house.
